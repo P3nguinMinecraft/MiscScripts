@@ -1,4 +1,6 @@
+print("b")
 require("constants")
+print("a")
 repeat task.wait() until game:IsLoaded()
 if game.PlaceId ~= constants.FORGE_ISLAND_2 then return end
 
