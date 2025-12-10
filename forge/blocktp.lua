@@ -1,8 +1,5 @@
-print("b")
-require("constants")
-print("a")
 repeat task.wait() until game:IsLoaded()
-if game.PlaceId ~= constants.FORGE_ISLAND_2 then return end
+if game.PlaceId ~= 129009554587176 then return end
 
 local tpService = cloneref(game:GetService("TeleportService"))
 tpService:SetTeleportGui(tpService)
