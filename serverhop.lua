@@ -3,6 +3,7 @@ return function(placeId)
     local HttpService = cloneref(game:GetService("HttpService"))
     local Players = cloneref(game:GetService("Players"))
 
+    TeleportService:TeleportCancel()
     local function listServers(cursor)
         local url = (
             "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
