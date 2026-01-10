@@ -78,7 +78,6 @@ local function search(targets)
     local found = false
     for category, names in pairs(targets) do
         for _, name in ipairs(names) do
-            print(name)
             local items = searchSingle(category, name)
             if #items > 0 then
                 result[name] = items
