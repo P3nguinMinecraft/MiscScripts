@@ -1,72 +1,113 @@
-return function(placeId)
-    local TeleportService = cloneref(game:GetService("TeleportService"))
-    local HttpService = cloneref(game:GetService("HttpService"))
-    local Players = cloneref(game:GetService("Players"))
+return function(placeid)
+    local TeleportService = game:GetService("TeleportService")
+    local HttpService = game:GetService("HttpService")
+    local Players = game:GetService("Players")
 
-    TeleportService:TeleportCancel()
-    local function listServers(cursor)
-        local url = (
-            "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
-        ):format(placeId)
+    local CACHE_TIME = 300 
+    local folder = "servers"
+    local filename = folder .. "/" .. placeid .. ".json"
 
-        if cursor then
-            url = url .. "&cursor=" .. cursor
-        end
+    if not isfolder(folder) then
+        makefolder(folder)
+    end
 
-        local raw
-        pcall(function()
-            raw = game:HttpGet(url)
+    local function now()
+        return os.time()
+    end
+
+    local function LoadCache()
+        if not isfile(filename) then return nil end
+
+        local ok, data = pcall(function()
+            return HttpService:JSONDecode(readfile(filename))
         end)
 
-        if not raw then return nil end
+        if not ok or not data.timestamp or not data.data then
+            return nil
+        end
 
-        local decoded = HttpService:JSONDecode(raw)
-        if decoded.errors then return nil end
+        if now() - data.timestamp > CACHE_TIME then
+            return nil
+        end
 
-        return decoded
+        return data.data
     end
 
-    local nextCursor = nil
-    local chosenServer = nil
+    local function SaveCache(data)
+        writefile(filename, HttpService:JSONEncode({
+            timestamp = now(),
+            data = data
+        }))
+    end
 
-    while not chosenServer do
-        local servers = listServers(nextCursor)
+    local function FetchServers(cursor)
+        local url =
+            "https://games.roblox.com/v1/games/" .. placeid ..
+            "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true" ..
+            (cursor and "&cursor=" .. cursor or "")
 
-        if not servers or not servers.data then
-            warn("Servers API cooldown or invalid response.")
-            task.wait(2)
-        else
-            local pool = {}
-            for i = 1, #servers.data do pool[i] = i end
+        local raw = game:HttpGet(url)
+        return HttpService:JSONDecode(raw)
+    end
 
-            while #pool > 0 do
-                local randIndex = math.random(#pool)
-                local index = table.remove(pool, randIndex)
-                local s = servers.data[index]
+    local Servers = LoadCache()
 
-                if s and s.playing < s.maxPlayers and s.id ~= game.JobId then
-                    chosenServer = s
-                    break
+    if not Servers then
+        local collected = { data = {}, nextPageCursor = nil }
+        local cursor = nil
+
+        repeat
+            local page = FetchServers(cursor)
+            if page and page.data then
+                for _, s in ipairs(page.data) do
+                    table.insert(collected.data, s)
                 end
             end
+            cursor = page.nextPageCursor
+        until not cursor
 
-            if not chosenServer then
-                if servers.nextPageCursor then
-                    nextCursor = servers.nextPageCursor
-                else
-                    warn("No available servers found.")
-                    return
-                end
+        Servers = collected
+        SaveCache(Servers)
+    end
+
+    local function RemoveServer(serverId)
+        if not isfile(filename) then return end
+        local cache = HttpService:JSONDecode(readfile(filename))
+
+        local new = {}
+        for _, s in ipairs(cache.data.data) do
+            if s.id ~= serverId then
+                table.insert(new, s)
             end
+        end
+
+        cache.data.data = new
+        writefile(filename, HttpService:JSONEncode(cache))
+    end
+
+    local target = nil
+
+    for _, s in ipairs(Servers.data) do
+        if s.playing < s.maxPlayers and s.id ~= game.JobId then
+            target = s
+            break
         end
     end
 
-    print("Teleporting to:", chosenServer.id)
-    TeleportService:TeleportToPlaceInstance(placeId, chosenServer.id, Players.LocalPlayer)
-    
+    if not target then
+        return warn("No valid server found")
+    end
+
+    RemoveServer(target.id)
+
+    TeleportService:TeleportToPlaceInstance(
+        placeid,
+        target.id,
+        Players.LocalPlayer
+    )
+
     task.spawn(function()
         task.wait(10)
-        warn("Teleport failed, retrying...")
-        TeleportService:TeleportToPlaceInstance(placeId, chosenServer.id, Players.LocalPlayer)
+        TeleportService:TeleportToPlaceInstance(placeid, game.JobId, Players.LocalPlayer)
     end)
 end
