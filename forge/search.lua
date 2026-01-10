@@ -107,8 +107,9 @@ return function(config)
     local id = placeids[config.island]
     if game.PlaceId ~= id then return end
     if config.loop then
-        while task.wait(5) do
+        while true do
             try(config, id)
+            task.wait(5)
         end
     else
         try(config, id)
