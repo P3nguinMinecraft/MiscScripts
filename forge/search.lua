@@ -81,7 +81,6 @@ local function search(targets)
             local items = searchSingle(category, name)
             if #items > 0 then
                 result[name] = items
-                warn("Found " .. #items .. " " .. name)
                 found = true
             end
         end
