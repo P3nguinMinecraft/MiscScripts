@@ -4,7 +4,7 @@ local config = {
     loop = true, -- to continue checking after target is done
     targets = {
         enemy = {"Golem"}, -- Enemy Names
-        rock = {"Heart of the Island", } -- Rock Names
+        rock = {"Heart of the Island", "Floating Crystal"} -- Rock Names
     }
 }
 
