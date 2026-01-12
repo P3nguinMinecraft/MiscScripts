@@ -1,4 +1,4 @@
-return function(placeid)
+return function(placeid, smallServer)
     local TeleportService = game:GetService("TeleportService")
     local HttpService = game:GetService("HttpService")
     local Players = game:GetService("Players")
@@ -43,7 +43,7 @@ return function(placeid)
     local function FetchServers(cursor)
         local url =
             "https://games.roblox.com/v1/games/" .. placeid ..
-            "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true" ..
+            "/servers/Public?limit=100&excludeFullGames=true&sortOrder=" .. (smallServer and "Asc" or "Desc") ..
             (cursor and "&cursor=" .. cursor or "")
 
         local raw = game:HttpGet(url)

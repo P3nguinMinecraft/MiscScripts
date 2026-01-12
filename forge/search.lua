@@ -2,6 +2,7 @@
 local config = {
     island = 3, -- 1, 2, 3
     loop = true, -- to continue checking after target is done
+    smallServer = true, -- hop to small servers
     targets = {
         enemy = {"Golem"}, -- Enemy Names
         rock = {"Heart of the Island", "Floating Crystal"} -- Rock Names
@@ -33,10 +34,10 @@ local function stopTP()
     tpService:SetTeleportGui(nil)
 end
 
-local function hop(placeId)
+local function hop(placeId, smallServer)
     warn("No targets found, hopping...")
     game:GetService("Players").LocalPlayer:Kick("No targets found, hopping...")
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/serverhop.lua"))()(placeId)
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/serverhop.lua"))()(placeId, smallServer)
 end
 
 local function getEnemy(name)
@@ -96,7 +97,7 @@ local function try(config, id)
             getgenv().firstSearch = true
         end
     else
-        task.spawn(function() hop(id) end)
+        task.spawn(function() hop(id, config.smallServer) end)
     end
     return result
 end

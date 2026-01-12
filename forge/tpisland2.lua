@@ -1,2 +1,2 @@
-loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/serverhop.lua"))()(129009554587176)
+loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/serverhop.lua"))()(129009554587176, true)
 if queue_on_teleport then queue_on_teleport("loadstring(game:HttpGet('https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/forge/blocktp.lua'))()") end
