@@ -5,7 +5,7 @@ return function(placeid, smallServer)
 
     local CACHE_TIME = 300 
     local folder = "servers"
-    local filename = folder .. "/" .. placeid .. (smallServer and "S" or "R") .. ".json"
+    local filename = folder .. "/" .. placeid .. (smallServer and "L" or "H") .. ".json"
 
     if not isfolder(folder) then
         makefolder(folder)
