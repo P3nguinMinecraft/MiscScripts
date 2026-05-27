@@ -17,7 +17,8 @@ local Services = setmetatable({}, {
 			rawset(self, name, cache)
 			return cache
 		else
-			error("Invalid Service: " .. tostring(name))
+			warn("Invalid Service: " .. tostring(name))
+            return nil
 		end
 	end
 })
