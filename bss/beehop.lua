@@ -17,19 +17,18 @@ local Services = setmetatable({}, {
 			rawset(self, name, cache)
 			return cache
 		else
-			warn("Invalid Service: " .. tostring(name))
-            return nil
+			error("Invalid Service: " .. tostring(name))
 		end
 	end
 })
 
 -- Version info
-local version = "1.0.0"
-local versid = "dalbaksdna"
-local updmsg = "Release"
-local changelog = "+Initial Release"
-local settingchanged = false
-local settingmsg = ""
+local version = "1.1.0"
+local versid = "eoqmvyxpza"
+local updmsg = "Update"
+local changelog = "+Added Stick Bug detection\n+Added Puffshroom detection"
+local settingchanged = true
+local settingmsg = "+StickBug\n+Puffshroom"
 local link = "https://discord.gg/BeeHop"
 
 -- Data structure
@@ -54,6 +53,8 @@ local data = {
         stopList = {
             ["Windy"] = false,
             ["Vicious"] = false,
+            ["StickBug"] = false,
+            ["Puffshroom"] = false,
         },
     },
 }
@@ -119,6 +120,7 @@ local camera = game.Workspace.CurrentCamera
 
 local npcBees = game.Workspace:FindFirstChild("NPCBees")
 local monsters = game.Workspace:FindFirstChild("Monsters")
+local happenings = game.Workspace:FindFirstChild("Happenings")
 
 -- ESP tracking
 local activeESPs = {
@@ -549,6 +551,18 @@ local conditionsMain = function()
     if not conditions.vicious then
         conditions.vicious = npcBees and npcBees:FindFirstChild("Vicious") or nil
     end
+
+    for _, monster in pairs(monsters and monsters:GetChildren() or {}) do
+        if string.find(monster.Name, "Stick Bug") then
+            conditions.stickbug = monster
+            break
+        end
+    end
+
+    local puffshrooms = happenings and happenings:FindFirstChild("Puffshrooms")
+    if puffshrooms and #puffshrooms:GetChildren() > 1 then
+        conditions.puffshroom = puffshrooms
+    end
     
     return conditions
 end
@@ -587,7 +601,17 @@ scan = function()
         desiredserver = true
         notifyBee(conditions.vicious.Name .. " found", 255, 200, 0, conditions.vicious.Name, conditions.vicious)
     end
-    
+
+    if config.stopList["StickBug"] and conditions.stickbug then
+        desiredserver = true
+        notifyBee(conditions.stickbug.Name .. " found", 255, 165, 0, conditions.stickbug.Name, conditions.stickbug)
+    end
+
+    if config.stopList["Puffshroom"] and conditions.puffshroom then
+        desiredserver = true
+        notifygui("Puffshrooms found (" .. #conditions.puffshroom:GetChildren() .. ")", 139, 69, 19)
+    end
+
     if not desiredserver then
         notifygui("Nothing found", 255, 153, 0)
         if config.autohop then

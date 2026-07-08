@@ -42,6 +42,7 @@ end
 local function toggleFloat(v)
     if v then
         game.Players.LocalPlayer.Character.Humanoid.PlatformStand = true
+        game.Workspace.Gravity = 0
         BV = Instance.new("BodyVelocity")
         BV.Parent = game.Players.LocalPlayer.Character.HumanoidRootPart
         BV.Velocity = Vector3.new(0, 0, 0)
@@ -50,6 +51,7 @@ local function toggleFloat(v)
             BV:Destroy()
         end
         game.Players.LocalPlayer.Character.Humanoid.PlatformStand = false
+        game.Workspace.Gravity = 192.5
     end
 end
 
