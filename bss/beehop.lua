@@ -22,12 +22,12 @@ local Services = setmetatable({}, {
 })
 
 -- Version info
-local version = "1.1.1"
-local versid = "hjxvmqpzlc"
+local version = "1.2.0"
+local versid = "vtqmdslbwe"
 local updmsg = "Update"
-local changelog = "+Added Sprouts\n+Added Sprout type filters\n+Added Gifted Vicious only\n+Flower zone display"
+local changelog = "+Added Auto Claim Hive\n+Added Full Auto Vicious\n+Added Vicious kill button\n+Added config prerequisites\n+New color scheme"
 local settingchanged = true
-local settingmsg = "+Sprouts/Sprout types\n+Gifted Vicious only"
+local settingmsg = "+Auto Claim Hive\n+Full Auto Vicious"
 local link = "https://discord.gg/fWncS2vFxn"
 
 -- Data structure
@@ -45,9 +45,17 @@ local data = {
         retro_challenge = 17579225831,
         retro_lobby = 17579226768
     },
+    prerequisites = {
+        {setting = "autohop", requires = "autoscan"},
+        {setting = "autoClaimHive", requires = "autohop"},
+        {setting = "fullAutoVic", requires = "autohop"},
+        {setting = "fullAutoVic", requires = "autoClaimHive"},
+    },
     defaultConfig = {
         autoscan = true,
         autohop = false,
+        autoClaimHive = false,
+        fullAutoVic = false,
         -- autowebhook = false,
         -- webhookUrl = "https://discord.com/api/webhooks/#/#",
         prioritizeSmallServer = false,
@@ -84,6 +92,7 @@ if not inBSS() then
 end
 
 local config
+local newversion = false
 
 local function saveConfig()
     if not writefile then return end
@@ -98,6 +107,8 @@ local function loadConfig()
         config = data.defaultConfig
     end
 
+    newversion = not string.match(config.versid or "", data.versid)
+
     if not writefile then return end
 
     if not isfile("BeeHop/config.json") and writefile then
@@ -107,7 +118,7 @@ local function loadConfig()
         writefile("BeeHop/config.json", Services.HttpService:JSONEncode(data.defaultConfig))
     end
 
-    if not string.match(config.versid or "", data.versid) then
+    if newversion then
         local function updateTable(default, previous)
             local updated = {}
             for key, value in pairs(default) do
@@ -129,13 +140,29 @@ local function loadConfig()
     end
 end
 
+local function checkPrerequisites()
+    local changed = false
+    for _, rule in ipairs(data.prerequisites) do
+        if config[rule.setting] and not config[rule.requires] then
+            config[rule.setting] = false
+            changed = true
+            warn("[BeeHop] Disabled " .. rule.setting .. ", it requires " .. rule.requires)
+        end
+    end
+    if changed then
+        saveConfig()
+    end
+end
 
 loadConfig()
+checkPrerequisites()
 
 print("[BeeHop] Loading")
 
 local desiredserver = false
+local viciousKill = nil
 local camera = game.Workspace.CurrentCamera
+local defaultGravity = game.Workspace.Gravity
 
 local npcBees = game.Workspace:FindFirstChild("NPCBees")
 local monsters = game.Workspace:FindFirstChild("Monsters")
@@ -171,12 +198,12 @@ local hop = loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMi
 
 local teleport = function(placeid)
     if not isLoaded() then
-        notifygui("Waiting for load completely", 255, 255, 255)
+        print("[BeeHop] Waiting for load completely")
     end
     repeat
         task.wait(0.5)
     until isLoaded()
-    notifygui("Teleporting", 22, 209, 242)
+    notifygui("Teleporting", 60, 140, 210)
     repeat
         hop(placeid, config.prioritizeSmallServer)
         task.wait(1)
@@ -248,8 +275,8 @@ local removeESP = function(part)
 end
 
 local createESP = function(part, beeType, r, g, b)
-	removeESP(part)
 	if not part then return end
+	removeESP(part)
     local esp = Instance.new("BillboardGui")
     esp.Name = "ESP"
     esp.Adornee = part
@@ -272,6 +299,22 @@ local createESP = function(part, beeType, r, g, b)
     return esp, label
 end
 
+local ui = {
+    background = Color3.fromRGB(16, 27, 45),
+    topbar = Color3.fromRGB(29, 52, 84),
+    list = Color3.fromRGB(10, 17, 28),
+    notification = Color3.fromRGB(23, 37, 58),
+    primary = Color3.fromRGB(45, 98, 168),
+    secondary = Color3.fromRGB(60, 140, 210),
+    accent = Color3.fromRGB(96, 186, 240),
+    input = Color3.fromRGB(214, 232, 248),
+    text = Color3.fromRGB(240, 248, 255),
+    dark = Color3.fromRGB(9, 20, 34),
+    close = Color3.fromRGB(198, 40, 40),
+    kill = Color3.fromRGB(196, 48, 48),
+    killactive = Color3.fromRGB(122, 24, 24),
+}
+
 -- GUI Functions
 local minimizegui = function(minimizeButton)
     local screenGui = minimizeButton.Parent.Parent.Parent
@@ -279,6 +322,7 @@ local minimizegui = function(minimizeButton)
     local mainFrame = screenGui:FindFirstChild("MainFrame")
     local scrollFrame = mainFrame:FindFirstChild("NotificationContainer")
     local topBar = mainFrame:FindFirstChild("TopBar")
+    local watermark = mainFrame:FindFirstChild("Watermark")
 
     if minimizeButton.Text == "-" then
         minimizeButton.Text = "+"
@@ -286,12 +330,18 @@ local minimizegui = function(minimizeButton)
         scrollFrame.Visible = false
         topBar.Size = UDim2.new(0.95, 0, 0.8, 0)
         topBar.Position = UDim2.new(0.5, 0, 0.06, 0)
+        if watermark then
+            watermark.Visible = false
+        end
     else
         minimizeButton.Text = "-"
         mainFrame.Size = UDim2.new(0.25, 0, 0.6, 0)
         scrollFrame.Visible = true
         topBar.Size = UDim2.new(0.95, 0, 0.12, 0)
         topBar.Position = UDim2.new(0.5, 0, 0.01, 0)
+        if watermark then
+            watermark.Visible = true
+        end
     end
 end
 
@@ -305,7 +355,7 @@ local creategui = function()
     mainFrame.Name = "MainFrame"
     mainFrame.Size = UDim2.new(0.25, 0, 0.6, 0)
     mainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+    mainFrame.BackgroundColor3 = ui.background
     mainFrame.BorderSizePixel = 0
     mainFrame.Active = true
     mainFrame.Draggable = true
@@ -315,7 +365,7 @@ local creategui = function()
     topBar.Name = "TopBar"
     topBar.Size = UDim2.new(0.95, 0, 0.12, 0)
     topBar.Position = UDim2.new(0.5, 0, 0.01, 0)
-    topBar.BackgroundColor3 = Color3.fromRGB(140, 140, 140)
+    topBar.BackgroundColor3 = ui.topbar
     topBar.BorderSizePixel = 0
     topBar.Active = true
     topBar.AnchorPoint = Vector2.new(0.5, 0)
@@ -323,12 +373,12 @@ local creategui = function()
 
     local scrollFrame = Instance.new("ScrollingFrame")
     scrollFrame.Name = "NotificationContainer"
-    scrollFrame.Size = UDim2.new(0.95, 0, 0.84, 0)
+    scrollFrame.Size = UDim2.new(0.95, 0, 0.79, 0)
     scrollFrame.Position = UDim2.new(0.5, 0, 0.14, 0)
     scrollFrame.AnchorPoint = Vector2.new(0.5, 0)
     scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
     scrollFrame.ScrollBarThickness = 8
-    scrollFrame.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+    scrollFrame.BackgroundColor3 = ui.list
     scrollFrame.BorderSizePixel = 0
     scrollFrame.Parent = mainFrame
 
@@ -342,9 +392,9 @@ local creategui = function()
     closeGUI.Name = "CloseGUI"
     closeGUI.Size = UDim2.new(0.07, 0, 0.4, 0)
     closeGUI.Position = UDim2.new(0.02, 0, 0.25, 0)
-    closeGUI.BackgroundColor3 = Color3.new(1, 0, 0)
+    closeGUI.BackgroundColor3 = ui.close
     closeGUI.Text = "X"
-    closeGUI.TextColor3 = Color3.new(1, 1, 1)
+    closeGUI.TextColor3 = ui.text
     closeGUI.TextScaled = true
     closeGUI.Font = Enum.Font.SourceSans
     closeGUI.AnchorPoint = Vector2.new(0, 0.5)
@@ -355,9 +405,9 @@ local creategui = function()
     hop_btn.Name = "ServerHop"
     hop_btn.Size = UDim2.new(0.25, 0, 0.4, 0)
     hop_btn.Position = UDim2.new(0.12, 0, 0.25, 0)
-    hop_btn.BackgroundColor3 = Color3.new(0, 1, 1)
+    hop_btn.BackgroundColor3 = ui.primary
     hop_btn.Text = "Server Hop"
-    hop_btn.TextColor3 = Color3.new(0.3, 0.3, 0.3)
+    hop_btn.TextColor3 = ui.text
     hop_btn.TextScaled = true
     hop_btn.Font = Enum.Font.SourceSans
     hop_btn.AnchorPoint = Vector2.new(0, 0.5)
@@ -368,9 +418,9 @@ local creategui = function()
     rescan_btn.Name = "Rescan"
     rescan_btn.Size = UDim2.new(0.2, 0, 0.4, 0)
     rescan_btn.Position = UDim2.new(0.39, 0, 0.25, 0)
-    rescan_btn.BackgroundColor3 = Color3.new(0.42, 0.75, 0.82)
+    rescan_btn.BackgroundColor3 = ui.secondary
     rescan_btn.Text = "Rescan"
-    rescan_btn.TextColor3 = Color3.new(0, 0, 0)
+    rescan_btn.TextColor3 = ui.text
     rescan_btn.TextScaled = true
     rescan_btn.Font = Enum.Font.SourceSans
     rescan_btn.AnchorPoint = Vector2.new(0, 0.5)
@@ -381,9 +431,9 @@ local creategui = function()
     JobId_btn.Name = "JobId"
     JobId_btn.Size = UDim2.new(0.28, 0, 0.4, 0)
     JobId_btn.Position = UDim2.new(0.61, 0, 0.25, 0)
-    JobId_btn.BackgroundColor3 = Color3.new(0.11, 0.81, 0.15)
+    JobId_btn.BackgroundColor3 = ui.primary
     JobId_btn.Text = "Copy JobId"
-    JobId_btn.TextColor3 = Color3.new(0, 0, 0)
+    JobId_btn.TextColor3 = ui.text
     JobId_btn.TextScaled = true
     JobId_btn.Font = Enum.Font.SourceSans
     JobId_btn.AnchorPoint = Vector2.new(0, 0.5)
@@ -394,9 +444,9 @@ local creategui = function()
     minimizeButton.Name = "minimizeButton"
     minimizeButton.Size = UDim2.new(0.07, 0, 0.4, 0)
     minimizeButton.Position = UDim2.new(0.91, 0, 0.25, 0)
-    minimizeButton.BackgroundColor3 = Color3.new(1, 0.93, 0)
+    minimizeButton.BackgroundColor3 = ui.accent
     minimizeButton.Text = "-"
-    minimizeButton.TextColor3 = Color3.new(0, 0, 0)
+    minimizeButton.TextColor3 = ui.dark
     minimizeButton.TextScaled = true
     minimizeButton.Font = Enum.Font.SourceSans
     minimizeButton.AnchorPoint = Vector2.new(0, 0.5)
@@ -407,8 +457,8 @@ local creategui = function()
     JobIdBox.Name = "JobIdBox"
     JobIdBox.Size = UDim2.new(0.7, 0, 0.4, 0)
     JobIdBox.Position = UDim2.new(0.02, 0, 0.75, 0)
-    JobIdBox.BackgroundColor3 = Color3.new(0.93, 0.63, 1)
-    JobIdBox.TextColor3 = Color3.new(0, 0, 0)
+    JobIdBox.BackgroundColor3 = ui.input
+    JobIdBox.TextColor3 = ui.dark
     JobIdBox.TextScaled = true
     JobIdBox.Font = Enum.Font.SourceSans
     JobIdBox.Text = "Input JobId"
@@ -420,14 +470,27 @@ local creategui = function()
     TPJobId.Name = "TPJobId"
     TPJobId.Size = UDim2.new(0.24, 0, 0.4, 0)
     TPJobId.Position = UDim2.new(0.74, 0, 0.75, 0)
-    TPJobId.BackgroundColor3 = Color3.new(0.57, 0.92, 0.63)
+    TPJobId.BackgroundColor3 = ui.secondary
     TPJobId.Text = "Goto JobId"
-    TPJobId.TextColor3 = Color3.new(0, 0, 0)
+    TPJobId.TextColor3 = ui.text
     TPJobId.TextScaled = true
     TPJobId.Font = Enum.Font.SourceSans
     TPJobId.AnchorPoint = Vector2.new(0, 0.5)
     TPJobId.Parent = topBar
     TPJobId.Selectable = false
+
+    local watermark = Instance.new("TextLabel")
+    watermark.Name = "Watermark"
+    watermark.Size = UDim2.new(0.95, 0, 0.04, 0)
+    watermark.Position = UDim2.new(0.5, 0, 0.945, 0)
+    watermark.AnchorPoint = Vector2.new(0.5, 0)
+    watermark.BackgroundTransparency = 1
+    watermark.BorderSizePixel = 0
+    watermark.Text = "BeeHop by Penguin - " .. version
+    watermark.TextColor3 = ui.accent
+    watermark.TextScaled = true
+    watermark.Font = Enum.Font.GothamBold
+    watermark.Parent = mainFrame
 
     -- Button click events
     closeGUI.MouseButton1Click:Connect(function()
@@ -439,13 +502,13 @@ local creategui = function()
     end)
 
     rescan_btn.MouseButton1Click:Connect(function()
-        notifygui("Rescanning", 107, 191, 209)
+        notifygui("Rescanning", 96, 186, 240)
         scan()
     end)
 
     JobId_btn.MouseButton1Click:Connect(function()
         setclipboard(game.JobId)
-        notifygui("Copied JobId", 255, 255, 255)
+        notifygui("Copied JobId", 170, 215, 245)
     end)
 
     minimizeButton.MouseButton1Click:Connect(function()
@@ -453,21 +516,21 @@ local creategui = function()
     end)
 
     TPJobId.MouseButton1Click:Connect(function()
-        notifygui("TPing to JobId", 255, 255, 255)
+        notifygui("TPing to JobId", 170, 215, 245)
         Services.TeleportService:TeleportToPlaceInstance(game.PlaceId, JobIdBox.Text, Services.Players.LocalPlayer)
     end)
 
     return screenGui
 end
 
-local createframe = function()
+local ensuregui = function()
     local CoreGui = Services.CoreGui or Services.Players.LocalPlayer.PlayerGui
-    local screenGui = CoreGui:FindFirstChild("BeeHop")
-    
-    if not screenGui then
-        screenGui = creategui()
-    end
-    
+    return CoreGui:FindFirstChild("BeeHop") or creategui()
+end
+
+local createframe = function()
+    local screenGui = ensuregui()
+
     local mainFrame = screenGui:FindFirstChild("MainFrame")
     local scrollFrame = mainFrame:FindFirstChild("NotificationContainer")
     local uiListLayout = scrollFrame:FindFirstChild("UIList")
@@ -475,7 +538,7 @@ local createframe = function()
     local frame = Instance.new("Frame")
     frame.Name = "NotificationFrame"
     frame.Size = UDim2.new(1, 0, 0, camera.ViewportSize.Y * 0.05)
-    frame.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+    frame.BackgroundColor3 = ui.notification
     frame.BorderSizePixel = 0
     frame.Parent = scrollFrame
     
@@ -497,9 +560,9 @@ notifygui = function(text, r, g, b)
     closeButton.Name = "CloseButton"
     closeButton.Size = UDim2.new(0.06, 0, 0.4, 0)
     closeButton.Position = UDim2.new(0.015, 0, 0.3, 0)
-    closeButton.BackgroundColor3 = Color3.new(1, 0, 0)
+    closeButton.BackgroundColor3 = ui.close
     closeButton.Text = "X"
-    closeButton.TextColor3 = Color3.new(1, 1, 1)
+    closeButton.TextColor3 = ui.text
     closeButton.TextScaled = true
     closeButton.Font = Enum.Font.SourceSans
     closeButton.Parent = frame
@@ -523,31 +586,99 @@ notifygui = function(text, r, g, b)
     return frame, textLabel
 end
 
+local addButton = function(frame, name, text, color, x, width)
+    local button = Instance.new("TextButton")
+    button.Name = name
+    button.Size = UDim2.new(width, 0, 0.7, 0)
+    button.Position = UDim2.new(x, 0, 0.15, 0)
+    button.BackgroundColor3 = color
+    button.Text = text
+    button.TextColor3 = ui.text
+    button.TextScaled = true
+    button.Font = Enum.Font.GothamBold
+    button.Parent = frame
+    button.Selectable = false
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = button
+
+    return button
+end
+
+local attachESP = function(beeModel, beeType, r, g, b)
+    if not beeModel then return end
+    if beeModel:IsA("BasePart") then
+        return createESP(beeModel, beeType, r, g, b)
+    end
+    return createESP(beeModel.PrimaryPart or beeModel:FindFirstChildWhichIsA("BasePart"), beeType, r, g, b)
+end
+
+local tpTo = function(beeModel, x, y, z)
+    local modelPos = getPosition(beeModel)
+    if modelPos then
+        pcall(tpc, modelPos + Vector3.new(x or 0, y or 0, z or 0))
+    end
+end
+
+local isGone = function(beeModel)
+    if not beeModel or not beeModel.Parent then return true end
+    local humanoid = beeModel:IsA("Model") and beeModel:FindFirstChildWhichIsA("Humanoid") or nil
+    if humanoid and humanoid.Health <= 0 then return true end
+    return false
+end
+
+local floatBV = nil
+
+local setFloat = function(state)
+    local character = Services.Players.LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+
+    if not state then
+        if floatBV then
+            floatBV:Destroy()
+            floatBV = nil
+        end
+        if humanoid then
+            humanoid.PlatformStand = false
+        end
+        game.Workspace.Gravity = defaultGravity
+        return
+    end
+
+    if not humanoid or not root then return end
+
+    humanoid.PlatformStand = true
+    game.Workspace.Gravity = 0
+
+    if not floatBV or floatBV.Parent ~= root then
+        if floatBV then
+            floatBV:Destroy()
+        end
+        floatBV = Instance.new("BodyVelocity")
+        floatBV.Velocity = Vector3.new(0, 0, 0)
+        floatBV.Parent = root
+    end
+end
+
+local tpToBee = function(beeModel, beeType)
+    if isGone(beeModel) then
+        notifygui((beeType or "Target") .. " does not exist anymore", 255, 153, 0)
+        return
+    end
+    tpTo(beeModel)
+end
+
 notifyBee = function(text, r, g, b, beeType, beeModel, isWindy)
     text = tostring(text)
-    
+
     local frame, textLabel = notifygui(text, r, g, b)
     textLabel.Size = UDim2.new(0.62, 0, 1, 0)
-    
-    -- ESP button
-    local espButton = Instance.new("TextButton")
-    espButton.Name = "ESPButton"
-    espButton.Size = UDim2.new(0.12, 0, 0.7, 0)
-    espButton.Position = UDim2.new(0.73, 0, 0.15, 0)
-    espButton.BackgroundColor3 = Color3.new(0.2, 0.8, 0.2)
-    espButton.Text = "ESP"
-    espButton.TextColor3 = Color3.new(1, 1, 1)
-    espButton.TextScaled = true
-    espButton.Font = Enum.Font.GothamBold
-    espButton.Parent = frame
-    espButton.Selectable = false
-    
-    local espCorner = Instance.new("UICorner")
-    espCorner.CornerRadius = UDim.new(0, 6)
-    espCorner.Parent = espButton
-    
+
+    local espButton = addButton(frame, "ESPButton", "ESP", ui.secondary, 0.73, 0.12)
     espButton.MouseButton1Click:Connect(function()
-        if isWindy and npcBees:FindFirstChild("Windy") then
+        if isWindy and npcBees and npcBees:FindFirstChild("Windy") then
             local esp, label = createESP(npcBees:FindFirstChild("Windy"), beeType, r, g, b)
 
             task.spawn(function()
@@ -567,44 +698,84 @@ notifyBee = function(text, r, g, b, beeType, beeModel, isWindy)
                     task.wait(0.5)
                 end
             end)
-        elseif beeModel then
-            if beeModel:IsA("BasePart") then
-                createESP(beeModel, beeType, r, g, b)
-            else
-                createESP(beeModel.PrimaryPart, beeType, r, g, b)
-            end
+        else
+            attachESP(beeModel, beeType, r, g, b)
         end
     end)
-    
-    -- TP button
-    local tpButton = Instance.new("TextButton")
-    tpButton.Name = "TPButton"
-    tpButton.Size = UDim2.new(0.12, 0, 0.7, 0)
-    tpButton.Position = UDim2.new(0.86, 0, 0.15, 0)
-    tpButton.BackgroundColor3 = Color3.new(0.8, 0.2, 0.8)
-    tpButton.Text = "TP"
-    tpButton.TextColor3 = Color3.new(1, 1, 1)
-    tpButton.TextScaled = true
-    tpButton.Font = Enum.Font.GothamBold
-    tpButton.Parent = frame
-    tpButton.Selectable = false
-    
-    local tpCorner = Instance.new("UICorner")
-    tpCorner.CornerRadius = UDim.new(0, 6)
-    tpCorner.Parent = tpButton
-    
+
+    local tpButton = addButton(frame, "TPButton", "TP", ui.accent, 0.86, 0.12)
     tpButton.MouseButton1Click:Connect(function()
-        if isWindy and npcBees:FindFirstChild("Windy") then
-            tpc(npcBees.Windy.Position + Vector3.new(0, 3, 0))
-        elseif beeModel then
-            local modelPos = getPosition(beeModel)
-            if modelPos then
-                tpc(modelPos + Vector3.new(0, 3, 0))
-            end
+        local windy = isWindy and npcBees and npcBees:FindFirstChild("Windy")
+        if windy then
+            tpTo(windy)
+        else
+            tpToBee(beeModel, beeType)
         end
     end)
-    
+
     return frame, textLabel
+end
+
+local notifyVicious = function(text, r, g, b, beeType, beeModel)
+    text = tostring(text)
+
+    local frame, textLabel = notifygui(text, r, g, b)
+    textLabel.Size = UDim2.new(0.55, 0, 1, 0)
+
+    local espButton = addButton(frame, "ESPButton", "ESP", ui.secondary, 0.66, 0.13)
+    espButton.MouseButton1Click:Connect(function()
+        attachESP(beeModel, beeType, r, g, b)
+    end)
+
+    local killButton = addButton(frame, "KillButton", "KILL", ui.kill, 0.81, 0.17)
+
+    local killing = false
+    local setKill
+    setKill = function(state)
+        if state == killing then return end
+        killing = state
+
+        if not killing then
+            killButton.Text = "KILL"
+            killButton.BackgroundColor3 = ui.kill
+            return
+        end
+
+        killButton.Text = "STOP"
+        killButton.BackgroundColor3 = ui.killactive
+
+        task.spawn(function()
+            local gone = false
+            while killing and frame.Parent do
+                if isGone(beeModel) then
+                    gone = true
+                    break
+                end
+                setFloat(true)
+                tpTo(beeModel, 10, 5, 0)
+                task.wait()
+            end
+
+            setFloat(false)
+            killing = false
+            if killButton.Parent then
+                killButton.Text = "KILL"
+                killButton.BackgroundColor3 = ui.kill
+            end
+
+            if gone and config.fullAutoVic then
+                notifygui("Vicious killed", 96, 186, 240)
+                task.wait(1)
+                scan()
+            end
+        end)
+    end
+
+    killButton.MouseButton1Click:Connect(function()
+        setKill(not killing)
+    end)
+
+    return frame, textLabel, setKill
 end
 
 local sproutTypes = {
@@ -701,7 +872,8 @@ end
 
 scan = function()
     desiredserver = false
-    
+    viciousKill = nil
+
     local conditions
     if game.PlaceId == data.placeids.main then
         conditions = conditionsMain()
@@ -733,12 +905,17 @@ scan = function()
     if config.stopList["Vicious"] and conditions.vicious
         and not (config.giftedViciousOnly and not string.find(conditions.vicious.Name, "Gifted")) then
         desiredserver = true
-        notifyBee(conditions.vicious.Name .. " found" .. zoneSuffix(conditions.vicious), 255, 200, 0, conditions.vicious.Name, conditions.vicious)
+        local r, g, b = 255, 80, 80
+        if string.find(conditions.vicious.Name, "Gifted") then
+            r, g, b = 255, 200, 0
+        end
+        local _, _, setKill = notifyVicious(conditions.vicious.Name .. zoneSuffix(conditions.vicious), r, g, b, conditions.vicious.Name, conditions.vicious)
+        viciousKill = setKill
     end
 
     if config.stopList["StickBug"] and conditions.stickbug then
         desiredserver = true
-        notifyBee(conditions.stickbug.Name .. " found" .. zoneSuffix(conditions.stickbug), 255, 165, 0, conditions.stickbug.Name, conditions.stickbug)
+        notifyBee(conditions.stickbug.Name .. zoneSuffix(conditions.stickbug), 255, 165, 0, conditions.stickbug.Name, conditions.stickbug)
     end
 
     if config.stopList["Puffshroom"] and conditions.puffshroom then
@@ -752,7 +929,7 @@ scan = function()
             end
         end
         local suffix = #puffZones > 0 and (" - " .. table.concat(puffZones, ", ")) or ""
-        notifygui("Puffshrooms found (" .. #conditions.puffshroom:GetChildren() .. ")" .. suffix, 139, 69, 19)
+        notifygui("Puffshrooms  (" .. #conditions.puffshroom:GetChildren() .. ")" .. suffix, 139, 69, 19)
     end
 
     if config.stopList["Sprout"] and conditions.sprouts then
@@ -770,18 +947,192 @@ scan = function()
         notifygui("Nothing found", 255, 153, 0)
         if config.autohop then
             task.spawn(function()
-                notifygui("Autohopping", 247, 94, 229)
+                notifygui("Autohopping", 60, 140, 210)
                 teleport(game.PlaceId)
             end)
         end
     end
 end
 
+local claimAttempts = 5
+local claimWait = 1
+local walkTimeout = 15
+local moveRefresh = 4
+local walkPoll = 0.25
+local arriveDistance = 4
+
+local getMover = function()
+    local character = Services.Players.LocalPlayer.Character
+    if not character then return nil, nil end
+    return character:FindFirstChildOfClass("Humanoid"), character:FindFirstChild("HumanoidRootPart")
+end
+
+local walkTo = function(target)
+    if typeof(target) == "CFrame" then
+        target = target.Position
+    end
+    if typeof(target) ~= "Vector3" then return false end
+
+    local started = os.clock()
+    local issued = -math.huge
+    while os.clock() - started < walkTimeout do
+        local humanoid, root = getMover()
+        if not humanoid or not root then
+            task.wait(walkPoll)
+        else
+            local offset = target - root.Position
+            if Vector3.new(offset.X, 0, offset.Z).Magnitude <= arriveDistance then
+                humanoid:MoveTo(root.Position)
+                return true
+            end
+
+            if os.clock() - issued >= moveRefresh then
+                issued = os.clock()
+                humanoid:MoveTo(target)
+            end
+
+            task.wait(walkPoll)
+        end
+    end
+
+    local humanoid, root = getMover()
+    if humanoid and root then
+        humanoid:MoveTo(root.Position)
+    end
+
+    return false
+end
+
+local claimHive
+claimHive = function(attempt)
+    local getHives = function()
+        local folder = game.Workspace:FindFirstChild("Honeycombs")
+        if not folder then return {} end
+    
+        local hives = {}
+        for _, model in ipairs(folder:GetChildren()) do
+            local id = model:FindFirstChild("HiveID")
+            local owner = model:FindFirstChild("Owner")
+            local spawnPos = model:FindFirstChild("SpawnPos")
+            if id and owner and spawnPos then
+                table.insert(hives, {
+                    model = model,
+                    id = id.Value,
+                    owner = owner,
+                    spawn = spawnPos
+                })
+            end
+        end
+    
+        table.sort(hives, function(a, b)
+            return a.id > b.id
+        end)
+    
+        return hives
+    end
+    
+    local ownedHive = function(hives)
+        for _, hive in ipairs(hives or getHives()) do
+            if hive.owner.Value == Services.Players.LocalPlayer then
+                return hive
+            end
+        end
+        return nil
+    end
+    
+    local firstUnclaimed = function(hives)
+        for _, hive in ipairs(hives or getHives()) do
+            if hive.owner.Value == nil then
+                return hive
+            end
+        end
+        return nil
+    end
+
+    attempt = attempt or 1
+
+    if attempt > claimAttempts then
+        notifygui("Could not claim a hive", 255, 153, 0)
+        return false
+    end
+
+    local events = Services.ReplicatedStorage:FindFirstChild("Events")
+    local claimEvent = events and events:FindFirstChild("ClaimHive")
+    if not claimEvent then
+        warn("[BeeHop] ClaimHive event missing")
+        return false
+    end
+
+    local hives = getHives()
+    if #hives == 0 then
+        warn("[BeeHop] No honeycombs found")
+        return false
+    end
+
+    local mine = ownedHive(hives)
+    if mine then
+        print("[BeeHop] Already own Hive " .. tostring(mine.id))
+        return true, mine
+    end
+
+    local target = firstUnclaimed(hives)
+    if not target then
+        notifygui("No unclaimed hives", 255, 153, 0)
+        return false
+    end
+
+    notifygui("Claiming Hive " .. tostring(target.id), 120, 200, 250)
+
+    if not walkTo(target.spawn.Value) then
+        return claimHive(attempt + 1)
+    end
+
+    claimEvent:FireServer(target.id)
+    task.wait(claimWait)
+
+    local claimed = ownedHive()
+    if claimed then
+        print("[BeeHop] Claimed Hive " .. tostring(claimed.id))
+        return true, claimed
+    end
+
+    return claimHive(attempt + 1)
+end
+
 -- Initialize
-notifygui("BeeHop by Penguin - " .. version, 0, 247, 255)
+print("[BeeHop] BeeHop by Penguin - " .. version)
+ensuregui()
+
+if newversion then
+    notifygui(updmsg .. " - " .. version, 96, 186, 240)
+    for line in string.gmatch(changelog, "[^\n]+") do
+        notifygui(line, 170, 215, 245)
+    end
+    if settingchanged then
+        notifygui("New settings", 96, 186, 240)
+        for line in string.gmatch(settingmsg, "[^\n]+") do
+            notifygui(line, 170, 215, 245)
+        end
+    end
+end
 
 if config.autoscan then
     scan()
+end
+
+if config.autoClaimHive and desiredserver and game.PlaceId == data.placeids.main then
+    task.spawn(function()
+        if not isLoaded() then
+            print("[BeeHop] Waiting for load completely")
+        end
+        repeat
+            task.wait(0.5)
+        until isLoaded()
+
+        if claimHive() and config.fullAutoVic and viciousKill then
+            viciousKill(true)
+        end
+    end)
 end
 
 print("[BeeHop] Loaded!")
