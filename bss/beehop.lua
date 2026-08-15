@@ -161,6 +161,7 @@ print("[BeeHop] Loading")
 
 local desiredserver = false
 local viciousKill = nil
+local viciousModel = nil
 local camera = game.Workspace.CurrentCamera
 local defaultGravity = game.Workspace.Gravity
 
@@ -662,12 +663,27 @@ local setFloat = function(state)
     end
 end
 
+local notifyMissing = function(beeType)
+    notifygui((beeType or "Target") .. " does not exist anymore", 255, 153, 0)
+end
+
 local tpToBee = function(beeModel, beeType)
     if isGone(beeModel) then
-        notifygui((beeType or "Target") .. " does not exist anymore", 255, 153, 0)
+        notifyMissing(beeType)
         return
     end
     tpTo(beeModel)
+end
+
+local watchVicious = function(beeModel)
+    task.spawn(function()
+        while not isGone(beeModel) do
+            task.wait(0.25)
+        end
+        notifygui("Vicious killed", 96, 186, 240)
+        task.wait(1)
+        scan()
+    end)
 end
 
 notifyBee = function(text, r, g, b, beeType, beeModel, isWindy)
@@ -745,12 +761,7 @@ local notifyVicious = function(text, r, g, b, beeType, beeModel)
         killButton.BackgroundColor3 = ui.killactive
 
         task.spawn(function()
-            local gone = false
-            while killing and frame.Parent do
-                if isGone(beeModel) then
-                    gone = true
-                    break
-                end
+            while killing and frame.Parent and not isGone(beeModel) do
                 setFloat(true)
                 tpTo(beeModel, 10, 5, 0)
                 task.wait()
@@ -762,16 +773,14 @@ local notifyVicious = function(text, r, g, b, beeType, beeModel)
                 killButton.Text = "KILL"
                 killButton.BackgroundColor3 = ui.kill
             end
-
-            if gone and config.fullAutoVic then
-                notifygui("Vicious killed", 96, 186, 240)
-                task.wait(1)
-                scan()
-            end
         end)
     end
 
     killButton.MouseButton1Click:Connect(function()
+        if not killing and isGone(beeModel) then
+            notifyMissing(beeType)
+            return
+        end
         setKill(not killing)
     end)
 
@@ -873,6 +882,7 @@ end
 scan = function()
     desiredserver = false
     viciousKill = nil
+    viciousModel = nil
 
     local conditions
     if game.PlaceId == data.placeids.main then
@@ -911,6 +921,7 @@ scan = function()
         end
         local _, _, setKill = notifyVicious(conditions.vicious.Name .. zoneSuffix(conditions.vicious), r, g, b, conditions.vicious.Name, conditions.vicious)
         viciousKill = setKill
+        viciousModel = conditions.vicious
     end
 
     if config.stopList["StickBug"] and conditions.stickbug then
@@ -1129,7 +1140,8 @@ if config.autoClaimHive and desiredserver and game.PlaceId == data.placeids.main
             task.wait(0.5)
         until isLoaded()
 
-        if claimHive() and config.fullAutoVic and viciousKill then
+        if claimHive() and config.fullAutoVic and viciousKill and viciousModel then
+            watchVicious(viciousModel)
             viciousKill(true)
         end
     end)
