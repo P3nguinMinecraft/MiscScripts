@@ -1,7 +1,6 @@
 -- BeeHop by Penguin!
 -- https://discord.gg/BeeHop
 
-
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 if not writefile then print("[BeeHop] You cannot change configs because your executor does not support files!") end
@@ -23,13 +22,13 @@ local Services = setmetatable({}, {
 })
 
 -- Version info
-local version = "1.1.0"
-local versid = "eoqmvyxpza"
+local version = "1.1.1"
+local versid = "hjxvmqpzlc"
 local updmsg = "Update"
-local changelog = "+Added Stick Bug detection\n+Added Puffshroom detection"
+local changelog = "+Added Sprouts\n+Added Sprout type filters\n+Added Gifted Vicious only\n+Flower zone display"
 local settingchanged = true
-local settingmsg = "+StickBug\n+Puffshroom"
-local link = "https://discord.gg/BeeHop"
+local settingmsg = "+Sprouts/Sprout types\n+Gifted Vicious only"
+local link = "https://discord.gg/fWncS2vFxn"
 
 -- Data structure
 local data = {
@@ -43,6 +42,8 @@ local data = {
     placeids = {
         main = 1537690962,
         hub = 15579077077,
+        retro_challenge = 17579225831,
+        retro_lobby = 17579226768
     },
     defaultConfig = {
         autoscan = true,
@@ -50,17 +51,35 @@ local data = {
         -- autowebhook = false,
         -- webhookUrl = "https://discord.com/api/webhooks/#/#",
         prioritizeSmallServer = false,
+        giftedViciousOnly = false,
         stopList = {
             ["Windy"] = false,
             ["Vicious"] = false,
             ["StickBug"] = false,
             ["Puffshroom"] = false,
+            ["Sprout"] = false,
+        },
+        sproutList = {
+            ["Normal"] = true,
+            ["Rare"] = true,
+            ["Moon"] = true,
+            ["Gummy"] = true,
+            ["Epic"] = true,
+            ["Legendary"] = true,
         },
     },
 }
 
-if game.PlaceId ~= data.placeids.main and game.PlaceId ~= data.placeids.hub then
-    warn("[BeeHop] You are not in Bee Swarm Simulator!")
+local function inBSS()
+    for _, id in pairs(data.placeids) do
+        if game.PlaceId == id then
+            return true
+        end
+    end
+    return false
+end
+
+if not inBSS() then
     return
 end
 
@@ -121,6 +140,8 @@ local camera = game.Workspace.CurrentCamera
 local npcBees = game.Workspace:FindFirstChild("NPCBees")
 local monsters = game.Workspace:FindFirstChild("Monsters")
 local happenings = game.Workspace:FindFirstChild("Happenings")
+local zones = game.Workspace:FindFirstChild("FlowerZones")
+local sprouts = game.Workspace:FindFirstChild("Sprouts")
 
 -- ESP tracking
 local activeESPs = {
@@ -138,8 +159,12 @@ local function isLoaded()
     return Services.Players.LocalPlayer.PlayerGui.LoadingScreenGui.LoadingMessage.Visible == false
 end
 
-local tp = function(x, y, z)
-    Services.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(Vector3.new(x, y, z))
+local function tpc(cframe)
+    Services.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(cframe)
+end
+
+local function tp(x, y, z)
+    tpc(Vector3.new(x, y, z))
 end
 
 local hop = loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/serverhop.lua"))()
@@ -156,6 +181,60 @@ local teleport = function(placeid)
         hop(placeid, config.prioritizeSmallServer)
         task.wait(1)
     until false
+end
+
+-- Returns the position of a Vector3 / BasePart / Model, or nil
+local getPosition = function(obj)
+    if not obj then return nil end
+    if typeof(obj) == "Vector3" then return obj end
+    if typeof(obj) ~= "Instance" then return nil end
+    if obj:IsA("BasePart") then return obj.Position end
+    if obj:IsA("Model") then
+        if obj.PrimaryPart then return obj.PrimaryPart.Position end
+        local success, pivot = pcall(function() return obj:GetPivot() end)
+        if success then return pivot.Position end
+    end
+    return nil
+end
+
+-- Returns the name of the FlowerZone closest to pos (horizontal distance to the
+-- zone's rectangle, so a point inside a zone is always distance 0)
+local getClosestZone = function(pos)
+    pos = getPosition(pos)
+    if not pos then return nil end
+
+    local zoneFolder = zones or game.Workspace:FindFirstChild("FlowerZones")
+    if not zoneFolder then return nil end
+
+    local closest, closestDist, closestCenter = nil, math.huge, math.huge
+    for _, zone in pairs(zoneFolder:GetChildren()) do
+        if zone:IsA("BasePart") then
+            local offset = zone.CFrame:PointToObjectSpace(pos)
+            local half = zone.Size / 2
+            local dx = math.max(math.abs(offset.X) - half.X, 0)
+            local dz = math.max(math.abs(offset.Z) - half.Z, 0)
+            local dist = math.sqrt(dx * dx + dz * dz)
+            -- Overlapping zones both give a distance of 0, so break the tie on
+            -- distance to the zone's center instead
+            local center = math.sqrt(offset.X * offset.X + offset.Z * offset.Z)
+            if dist < closestDist or (dist == closestDist and center < closestCenter) then
+                closestDist = dist
+                closestCenter = center
+                closest = zone
+            end
+        end
+    end
+
+    return closest and closest.Name or nil
+end
+
+local shortZone = function(name)
+    return name and string.match(name, "^%S+") or nil
+end
+
+local zoneSuffix = function(obj)
+    local zone = shortZone(getClosestZone(obj))
+    return zone and (" - " .. zone) or ""
 end
 
 -- ESP function to attach billboard to bee
@@ -489,7 +568,7 @@ notifyBee = function(text, r, g, b, beeType, beeModel, isWindy)
                 end
             end)
         elseif beeModel then
-            if beeModel:IsA("Part") then
+            if beeModel:IsA("BasePart") then
                 createESP(beeModel, beeType, r, g, b)
             else
                 createESP(beeModel.PrimaryPart, beeType, r, g, b)
@@ -516,17 +595,45 @@ notifyBee = function(text, r, g, b, beeType, beeModel, isWindy)
     
     tpButton.MouseButton1Click:Connect(function()
         if isWindy and npcBees:FindFirstChild("Windy") then
-           Services.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(npcBees.Windy.Position + Vector3.new(0, 5, 0))
+            tpc(npcBees.Windy.Position + Vector3.new(0, 3, 0))
         elseif beeModel then
-            if beeModel:IsA("Part") then
-                Services.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(beeModel.Position + Vector3.new(0, 5, 0))
-            else
-                Services.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(beeModel.PrimaryPart.Position + Vector3.new(0, 5, 0))
+            local modelPos = getPosition(beeModel)
+            if modelPos then
+                tpc(modelPos + Vector3.new(0, 3, 0))
             end
         end
     end)
     
     return frame, textLabel
+end
+
+local sproutTypes = {
+    {name = "Normal", r = 180, g = 190, b = 186},
+    {name = "Rare", r = 168, g = 167, b = 169},
+    {name = "Moon", r = 103, g = 162, b = 201},
+    {name = "Gummy", r = 242, g = 129, b = 255},
+    {name = "Epic", r = 169, g = 157, b = 5},
+    {name = "Legendary", r = 20, g = 165, b = 199},
+}
+
+local getSproutType = function(sprout)
+    local color = sprout.Color
+    local r = math.floor(color.R * 255 + 0.5)
+    local g = math.floor(color.G * 255 + 0.5)
+    local b = math.floor(color.B * 255 + 0.5)
+
+    for _, sproutType in ipairs(sproutTypes) do
+        if sproutType.r == r and sproutType.g == g and sproutType.b == b then
+            return sproutType.name, sproutType.r, sproutType.g, sproutType.b
+        end
+    end
+
+    return "Unknown", 124, 252, 0
+end
+
+local sproutAllowed = function(sproutType)
+    if sproutType == "Unknown" or not config.sproutList then return true end
+    return config.sproutList[sproutType] == true
 end
 
 -- Main conditions
@@ -563,7 +670,26 @@ local conditionsMain = function()
     if puffshrooms and #puffshrooms:GetChildren() > 1 then
         conditions.puffshroom = puffshrooms
     end
-    
+
+    local sproutFolder = sprouts or game.Workspace:FindFirstChild("Sprouts")
+    if sproutFolder then
+        local found = {}
+        for _, child in pairs(sproutFolder:GetChildren()) do
+            local sprout
+            if child:IsA("BasePart") and child.Name == "Sprout" then
+                sprout = child
+            else
+                sprout = child:FindFirstChild("Sprout", true)
+            end
+            if sprout and sprout:IsA("BasePart") then
+                table.insert(found, sprout)
+            end
+        end
+        if #found > 0 then
+            conditions.sprouts = found
+        end
+    end
+
     return conditions
 end
 
@@ -587,29 +713,57 @@ scan = function()
     end
     
     if config.stopList["Windy"] and conditions.windy then
-        desiredserver = true
-        if conditions.windy.Parent == monsters then
-            notifyBee(conditions.windy.Name .. " active", 255, 200, 0, conditions.windy.Name, conditions.windy, true)
-        elseif conditions.windy.Parent == npcBees then
-            notifyBee("Windy in cloud", 255, 200, 0, "Windy (Inactive)", conditions.windy, true)
-        else
-            notifyBee("Windy ??", 255, 200, 0, "Windy", conditions.windy, true)
+        local zone = getClosestZone(conditions.windy)
+        local inCloud = conditions.windy.Parent == npcBees
+        -- Windy sitting in its cloud over Pepper Patch is unreachable, ignore it
+        if not (inCloud and zone == "Pepper Patch") then
+            local short = shortZone(zone)
+            local suffix = short and (" - " .. short) or ""
+            desiredserver = true
+            if conditions.windy.Parent == monsters then
+                notifyBee(conditions.windy.Name .. " active" .. suffix, 255, 200, 0, conditions.windy.Name, conditions.windy, true)
+            elseif inCloud then
+                notifyBee("Windy in cloud" .. suffix, 255, 200, 0, "Windy (Inactive)", conditions.windy, true)
+            else
+                notifyBee("Windy ??" .. suffix, 255, 200, 0, "Windy", conditions.windy, true)
+            end
         end
     end
-    
-    if config.stopList["Vicious"] and conditions.vicious then
+
+    if config.stopList["Vicious"] and conditions.vicious
+        and not (config.giftedViciousOnly and not string.find(conditions.vicious.Name, "Gifted")) then
         desiredserver = true
-        notifyBee(conditions.vicious.Name .. " found", 255, 200, 0, conditions.vicious.Name, conditions.vicious)
+        notifyBee(conditions.vicious.Name .. " found" .. zoneSuffix(conditions.vicious), 255, 200, 0, conditions.vicious.Name, conditions.vicious)
     end
 
     if config.stopList["StickBug"] and conditions.stickbug then
         desiredserver = true
-        notifyBee(conditions.stickbug.Name .. " found", 255, 165, 0, conditions.stickbug.Name, conditions.stickbug)
+        notifyBee(conditions.stickbug.Name .. " found" .. zoneSuffix(conditions.stickbug), 255, 165, 0, conditions.stickbug.Name, conditions.stickbug)
     end
 
     if config.stopList["Puffshroom"] and conditions.puffshroom then
         desiredserver = true
-        notifygui("Puffshrooms found (" .. #conditions.puffshroom:GetChildren() .. ")", 139, 69, 19)
+        local puffZones, seen = {}, {}
+        for _, puff in pairs(conditions.puffshroom:GetChildren()) do
+            local zone = shortZone(getClosestZone(puff))
+            if zone and not seen[zone] then
+                seen[zone] = true
+                table.insert(puffZones, zone)
+            end
+        end
+        local suffix = #puffZones > 0 and (" - " .. table.concat(puffZones, ", ")) or ""
+        notifygui("Puffshrooms found (" .. #conditions.puffshroom:GetChildren() .. ")" .. suffix, 139, 69, 19)
+    end
+
+    if config.stopList["Sprout"] and conditions.sprouts then
+        for _, sprout in pairs(conditions.sprouts) do
+            local sproutType, r, g, b = getSproutType(sprout)
+            if sproutAllowed(sproutType) then
+                desiredserver = true
+                local label = sproutType .. " Sprout"
+                notifyBee(label .. zoneSuffix(sprout), r, g, b, label, sprout)
+            end
+        end
     end
 
     if not desiredserver then
