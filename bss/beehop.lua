@@ -1,7 +1,5 @@
--- loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/bss/beehop.lua"))()
-
 -- BeeHop by Penguin!
--- https://discord.gg/BeeHop
+-- https://discord.gg/fWncS2vFxn
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
