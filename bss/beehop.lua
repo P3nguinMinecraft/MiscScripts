@@ -1,6 +1,7 @@
 -- BeeHop by Penguin!
 -- https://discord.gg/fWncS2vFxn
 
+task.wait(3)
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 if not writefile then print("[BeeHop] You cannot change configs because your executor does not support files!") end
