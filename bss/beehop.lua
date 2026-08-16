@@ -1,3 +1,5 @@
+-- loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/bss/beehop.lua"))()
+
 -- BeeHop by Penguin!
 -- https://discord.gg/BeeHop
 
@@ -22,12 +24,12 @@ local Services = setmetatable({}, {
 })
 
 -- Version info
-local version = "1.2.0"
-local versid = "vtqmdslbwe"
+local version = "1.2.1"
+local versid = "nsl9enbl"
 local updmsg = "Update"
-local changelog = "+Added Auto Claim Hive\n+Added Full Auto Vicious\n+Added Vicious kill button\n+Added config prerequisites\n+New color scheme"
+local changelog = "+Supreme Sprout Support"
 local settingchanged = true
-local settingmsg = "+Auto Claim Hive\n+Full Auto Vicious"
+local settingmsg = "+Supreme Sprout Option\n+Remove autoscan"
 local link = "https://discord.gg/fWncS2vFxn"
 
 -- Data structure
@@ -46,13 +48,11 @@ local data = {
         retro_lobby = 17579226768
     },
     prerequisites = {
-        {setting = "autohop", requires = "autoscan"},
         {setting = "autoClaimHive", requires = "autohop"},
         {setting = "fullAutoVic", requires = "autohop"},
         {setting = "fullAutoVic", requires = "autoClaimHive"},
     },
     defaultConfig = {
-        autoscan = true,
         autohop = false,
         autoClaimHive = false,
         fullAutoVic = false,
@@ -60,6 +60,8 @@ local data = {
         -- webhookUrl = "https://discord.com/api/webhooks/#/#",
         prioritizeSmallServer = false,
         giftedViciousOnly = false,
+        vicMinLevel = 1,
+        vicMaxLevel = 12,
         stopList = {
             ["Windy"] = false,
             ["Vicious"] = false,
@@ -74,6 +76,7 @@ local data = {
             ["Gummy"] = true,
             ["Epic"] = true,
             ["Legendary"] = true,
+            ["Supreme"] = true,
         },
     },
 }
@@ -141,23 +144,23 @@ local function loadConfig()
 end
 
 local function checkPrerequisites()
-    local changed = false
     for _, rule in ipairs(data.prerequisites) do
         if config[rule.setting] and not config[rule.requires] then
             config[rule.setting] = false
-            changed = true
             warn("[BeeHop] Disabled " .. rule.setting .. ", it requires " .. rule.requires)
         end
     end
-    if changed then
-        saveConfig()
+    config.vicMinLevel = math.clamp(tonumber(config.vicMinLevel) or data.defaultConfig.vicMinLevel, 1, 12)
+    config.vicMaxLevel = math.clamp(tonumber(config.vicMaxLevel) or data.defaultConfig.vicMaxLevel, 1, 12)
+
+    if config.vicMaxLevel <= config.vicMinLevel then
+        config.vicMaxLevel = config.vicMinLevel
     end
 end
 
 loadConfig()
 checkPrerequisites()
-
-print("[BeeHop] Loading")
+saveConfig()
 
 local desiredserver = false
 local viciousKill = nil
@@ -794,6 +797,7 @@ local sproutTypes = {
     {name = "Gummy", r = 242, g = 129, b = 255},
     {name = "Epic", r = 169, g = 157, b = 5},
     {name = "Legendary", r = 20, g = 165, b = 199},
+    {name = "Supreme", r = 71, g = 255, b = 88}
 }
 
 local getSproutType = function(sprout)
@@ -814,6 +818,21 @@ end
 local sproutAllowed = function(sproutType)
     if sproutType == "Unknown" or not config.sproutList then return true end
     return config.sproutList[sproutType] == true
+end
+
+local viciousLevel = function(name)
+    return tonumber(string.match(name, "%(Lvl%s*(%d+)%)"))
+end
+
+local viciousAllowed = function(vicious)
+    if config.giftedViciousOnly and not string.find(vicious.Name, "Gifted") then
+        return false
+    end
+
+    local level = viciousLevel(vicious.Name)
+    if not level then return true end
+
+    return level >= config.vicMinLevel and level <= config.vicMaxLevel
 end
 
 -- Main conditions
@@ -897,7 +916,7 @@ scan = function()
     if config.stopList["Windy"] and conditions.windy then
         local zone = getClosestZone(conditions.windy)
         local inCloud = conditions.windy.Parent == npcBees
-        -- Windy sitting in its cloud over Pepper Patch is unreachable, ignore it
+        -- Windy in cloud over Pepper Patch is unreachable (out of map) - ignore
         if not (inCloud and zone == "Pepper Patch") then
             local short = shortZone(zone)
             local suffix = short and (" - " .. short) or ""
@@ -912,8 +931,7 @@ scan = function()
         end
     end
 
-    if config.stopList["Vicious"] and conditions.vicious
-        and not (config.giftedViciousOnly and not string.find(conditions.vicious.Name, "Gifted")) then
+    if config.stopList["Vicious"] and conditions.vicious and viciousAllowed(conditions.vicious) then
         desiredserver = true
         local r, g, b = 255, 80, 80
         if string.find(conditions.vicious.Name, "Gifted") then
@@ -1127,9 +1145,7 @@ if newversion then
     end
 end
 
-if config.autoscan then
-    scan()
-end
+scan()
 
 if config.autoClaimHive and desiredserver and game.PlaceId == data.placeids.main then
     task.spawn(function()
