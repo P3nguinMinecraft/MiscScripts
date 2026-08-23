@@ -1,3 +1,5 @@
+-- loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/bss/beehop.lua"))()
+
 -- BeeHop by Penguin!
 -- https://discord.gg/fWncS2vFxn
 
@@ -506,7 +508,7 @@ local creategui = function()
 
     rescan_btn.MouseButton1Click:Connect(function()
         notifygui("Rescanning", 96, 186, 240)
-        scan()
+        scan(false)
     end)
 
     JobId_btn.MouseButton1Click:Connect(function()
@@ -684,7 +686,7 @@ local watchVicious = function(beeModel)
         end
         notifygui("Vicious killed", 96, 186, 240)
         task.wait(1)
-        scan()
+        scan(false)
     end)
 end
 
@@ -897,7 +899,7 @@ local conditionsHub = function()
     return conditions
 end
 
-scan = function()
+scan = function(first)
     desiredserver = false
     viciousKill = nil
     viciousModel = nil
@@ -972,13 +974,23 @@ scan = function()
     end
 
     if not desiredserver then
-        notifygui("Nothing found", 255, 153, 0)
         if config.autohop then
             task.spawn(function()
                 notifygui("Autohopping", 60, 140, 210)
                 teleport(game.PlaceId)
             end)
         end
+    elseif config.autohop and first then
+        local sound = Instance.new("Sound")
+        sound.SoundId = "rbxassetid://851699118"
+        sound.Volume = 5
+        sound.Parent = game:GetService("SoundService")
+        task.spawn(function()
+            for i = 1, 5 do
+                sound:Play()
+                task.wait(0.7)
+            end
+        end)
     end
 end
 
@@ -1144,7 +1156,7 @@ if newversion then
     end
 end
 
-scan()
+scan(true)
 
 if config.autoClaimHive and desiredserver and game.PlaceId == data.placeids.main then
     task.spawn(function()
