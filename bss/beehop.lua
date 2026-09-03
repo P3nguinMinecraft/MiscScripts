@@ -201,13 +201,36 @@ end
 
 local hop = loadstring(game:HttpGet("https://raw.githubusercontent.com/P3nguinMinecraft/MiscScripts/refs/heads/main/serverhop.lua"))()
 
-local teleport = function(placeid)
+local autohopWaiting = false
+local autohopCancelled = false
+
+local cancelAutohop = function()
+    if not autohopWaiting then return false end
+    autohopWaiting = false
+    autohopCancelled = true
+    notifygui("Autohop cancelled", 255, 153, 0)
+    return true
+end
+
+local teleport = function(placeid, autohop)
     if not isLoaded() then
         print("[BeeHop] Waiting for load completely")
+        if autohop then
+            autohopWaiting = true
+        end
     end
     repeat
+        if autohop and autohopCancelled then
+            autohopCancelled = false
+            return
+        end
         task.wait(0.5)
     until isLoaded()
+    autohopWaiting = false
+    if autohop and autohopCancelled then
+        autohopCancelled = false
+        return
+    end
     notifygui("Teleporting", 60, 140, 210)
     repeat
         hop(placeid, config.prioritizeSmallServer)
@@ -350,6 +373,8 @@ local minimizegui = function(minimizeButton)
     end
 end
 
+local toggleConfig
+
 local creategui = function()
     local CoreGui = Services.CoreGui or Services.Players.LocalPlayer.PlayerGui
     local screenGui = Instance.new("ScreenGui")
@@ -359,7 +384,7 @@ local creategui = function()
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
     mainFrame.Size = UDim2.new(0.25, 0, 0.6, 0)
-    mainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
+    mainFrame.Position = UDim2.new(0.01, 0, 0.39, 0)
     mainFrame.BackgroundColor3 = ui.background
     mainFrame.BorderSizePixel = 0
     mainFrame.Active = true
@@ -408,8 +433,8 @@ local creategui = function()
 
     local hop_btn = Instance.new("TextButton")
     hop_btn.Name = "ServerHop"
-    hop_btn.Size = UDim2.new(0.25, 0, 0.4, 0)
-    hop_btn.Position = UDim2.new(0.12, 0, 0.25, 0)
+    hop_btn.Size = UDim2.new(0.19, 0, 0.4, 0)
+    hop_btn.Position = UDim2.new(0.11, 0, 0.25, 0)
     hop_btn.BackgroundColor3 = ui.primary
     hop_btn.Text = "Server Hop"
     hop_btn.TextColor3 = ui.text
@@ -421,8 +446,8 @@ local creategui = function()
 
     local rescan_btn = Instance.new("TextButton")
     rescan_btn.Name = "Rescan"
-    rescan_btn.Size = UDim2.new(0.2, 0, 0.4, 0)
-    rescan_btn.Position = UDim2.new(0.39, 0, 0.25, 0)
+    rescan_btn.Size = UDim2.new(0.14, 0, 0.4, 0)
+    rescan_btn.Position = UDim2.new(0.31, 0, 0.25, 0)
     rescan_btn.BackgroundColor3 = ui.secondary
     rescan_btn.Text = "Rescan"
     rescan_btn.TextColor3 = ui.text
@@ -434,8 +459,8 @@ local creategui = function()
 
     local JobId_btn = Instance.new("TextButton")
     JobId_btn.Name = "JobId"
-    JobId_btn.Size = UDim2.new(0.28, 0, 0.4, 0)
-    JobId_btn.Position = UDim2.new(0.61, 0, 0.25, 0)
+    JobId_btn.Size = UDim2.new(0.21, 0, 0.4, 0)
+    JobId_btn.Position = UDim2.new(0.46, 0, 0.25, 0)
     JobId_btn.BackgroundColor3 = ui.primary
     JobId_btn.Text = "Copy JobId"
     JobId_btn.TextColor3 = ui.text
@@ -444,6 +469,19 @@ local creategui = function()
     JobId_btn.AnchorPoint = Vector2.new(0, 0.5)
     JobId_btn.Parent = topBar
     JobId_btn.Selectable = false
+
+    local config_btn = Instance.new("TextButton")
+    config_btn.Name = "Config"
+    config_btn.Size = UDim2.new(0.21, 0, 0.4, 0)
+    config_btn.Position = UDim2.new(0.68, 0, 0.25, 0)
+    config_btn.BackgroundColor3 = ui.secondary
+    config_btn.Text = "Config"
+    config_btn.TextColor3 = ui.text
+    config_btn.TextScaled = true
+    config_btn.Font = Enum.Font.SourceSans
+    config_btn.AnchorPoint = Vector2.new(0, 0.5)
+    config_btn.Parent = topBar
+    config_btn.Selectable = false
 
     local minimizeButton = Instance.new("TextButton")
     minimizeButton.Name = "minimizeButton"
@@ -508,12 +546,16 @@ local creategui = function()
 
     rescan_btn.MouseButton1Click:Connect(function()
         notifygui("Rescanning", 96, 186, 240)
-        scan(false)
+        scan()
     end)
 
     JobId_btn.MouseButton1Click:Connect(function()
         setclipboard(game.JobId)
         notifygui("Copied JobId", 170, 215, 245)
+    end)
+
+    config_btn.MouseButton1Click:Connect(function()
+        toggleConfig(screenGui)
     end)
 
     minimizeButton.MouseButton1Click:Connect(function()
@@ -611,6 +653,477 @@ local addButton = function(frame, name, text, color, x, width)
     return button
 end
 
+local sproutOrder = {"Normal", "Moon", "Rare", "Gummy", "Epic", "Legendary", "Supreme"}
+
+local configFrame
+local refreshConfig
+
+local buildConfigGui = function(screenGui)
+    local rowHeight = math.max(24, math.floor(camera.ViewportSize.Y * 0.036))
+    local refreshers = {}
+    local viciousRows = {}
+    local sproutRows = {}
+    local order = 0
+
+    local nextOrder = function()
+        order = order + 1
+        return order
+    end
+
+    local round = function(gui, radius)
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, radius or 4)
+        corner.Parent = gui
+        return corner
+    end
+
+    local capText = function(gui, size)
+        local constraint = Instance.new("UITextSizeConstraint")
+        constraint.MaxTextSize = size or 14
+        constraint.Parent = gui
+        return constraint
+    end
+
+    local frame = Instance.new("Frame")
+    frame.Name = "ConfigFrame"
+    frame.Size = UDim2.new(0.23, 0, 0.6, 0)
+    frame.Position = UDim2.new(0.37, 0, 0.4, 0)
+    frame.BackgroundColor3 = ui.background
+    frame.BorderSizePixel = 0
+    frame.Active = true
+    frame.Draggable = true
+    frame.Visible = false
+    frame.Parent = screenGui
+
+    local topBar = Instance.new("Frame")
+    topBar.Name = "TopBar"
+    topBar.Size = UDim2.new(0.95, 0, 0.08, 0)
+    topBar.Position = UDim2.new(0.5, 0, 0.015, 0)
+    topBar.AnchorPoint = Vector2.new(0.5, 0)
+    topBar.BackgroundColor3 = ui.topbar
+    topBar.BorderSizePixel = 0
+    topBar.Active = true
+    topBar.Parent = frame
+
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(0.45, 0, 0.6, 0)
+    title.Position = UDim2.new(0.03, 0, 0.2, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "Config"
+    title.TextColor3 = ui.text
+    title.TextScaled = true
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Font = Enum.Font.GothamBold
+    title.Parent = topBar
+    capText(title, 16)
+
+    local saveButton = Instance.new("TextButton")
+    saveButton.Name = "SaveConfig"
+    saveButton.Size = UDim2.new(0.3, 0, 0.6, 0)
+    saveButton.Position = UDim2.new(0.53, 0, 0.2, 0)
+    saveButton.BackgroundColor3 = ui.primary
+    saveButton.Text = "Save"
+    saveButton.TextColor3 = ui.text
+    saveButton.TextScaled = true
+    saveButton.Font = Enum.Font.GothamBold
+    saveButton.Parent = topBar
+    saveButton.Selectable = false
+    round(saveButton, 6)
+    capText(saveButton)
+
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseConfig"
+    closeButton.Size = UDim2.new(0.12, 0, 0.6, 0)
+    closeButton.Position = UDim2.new(0.85, 0, 0.2, 0)
+    closeButton.BackgroundColor3 = ui.close
+    closeButton.Text = "X"
+    closeButton.TextColor3 = ui.text
+    closeButton.TextScaled = true
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.Parent = topBar
+    closeButton.Selectable = false
+    round(closeButton, 6)
+    capText(closeButton)
+
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Name = "ConfigContainer"
+    scroll.Size = UDim2.new(0.95, 0, 0.885, 0)
+    scroll.Position = UDim2.new(0.5, 0, 0.105, 0)
+    scroll.AnchorPoint = Vector2.new(0.5, 0)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.ScrollBarThickness = 6
+    scroll.ScrollBarImageColor3 = ui.accent
+    scroll.BackgroundColor3 = ui.list
+    scroll.BorderSizePixel = 0
+    scroll.Parent = frame
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 4)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = scroll
+
+    local scrollPadding = Instance.new("UIPadding")
+    scrollPadding.PaddingTop = UDim.new(0, 5)
+    scrollPadding.PaddingBottom = UDim.new(0, 5)
+    scrollPadding.PaddingLeft = UDim.new(0, 5)
+    scrollPadding.PaddingRight = UDim.new(0, 5)
+    scrollPadding.Parent = scroll
+
+    local makeRow = function(height)
+        local row = Instance.new("Frame")
+        row.Name = "ConfigRow"
+        row.LayoutOrder = nextOrder()
+        row.Size = UDim2.new(1, -6, 0, height or rowHeight)
+        row.BackgroundColor3 = ui.notification
+        row.BorderSizePixel = 0
+        row.Parent = scroll
+        round(row)
+        return row
+    end
+
+    local makeLabel = function(row, text, indent)
+        local offset = 8 + (indent or 0) * 12
+        local label = Instance.new("TextLabel")
+        label.Name = "Label"
+        label.Size = UDim2.new(0.63, -offset, 0.7, 0)
+        label.Position = UDim2.new(0, offset, 0.15, 0)
+        label.BackgroundTransparency = 1
+        label.Text = text
+        label.TextColor3 = ui.text
+        label.TextScaled = true
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.Font = Enum.Font.GothamBold
+        label.Parent = row
+        capText(label)
+        return label
+    end
+
+    local addSection = function(text)
+        local label = Instance.new("TextLabel")
+        label.Name = "Section"
+        label.LayoutOrder = nextOrder()
+        label.Size = UDim2.new(1, -6, 0, math.floor(rowHeight * 0.8))
+        label.BackgroundTransparency = 1
+        label.Text = text
+        label.TextColor3 = ui.accent
+        label.TextScaled = true
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.Font = Enum.Font.GothamBold
+        label.Parent = scroll
+        capText(label, 15)
+        return label
+    end
+
+    local addToggle = function(options)
+        local row = makeRow()
+        makeLabel(row, options.text, options.indent)
+
+        local button = Instance.new("TextButton")
+        button.Name = "Toggle"
+        button.Size = UDim2.new(0.3, 0, 0.7, 0)
+        button.Position = UDim2.new(0.67, 0, 0.15, 0)
+        button.BackgroundColor3 = ui.dark
+        button.Text = "Off"
+        button.TextColor3 = ui.text
+        button.TextScaled = true
+        button.Font = Enum.Font.GothamBold
+        button.Parent = row
+        button.Selectable = false
+        round(button, 6)
+        capText(button)
+
+        local locked = function()
+            return options.gate ~= nil and not options.gate()
+        end
+
+        table.insert(refreshers, function()
+            local value = options.get() == true
+            button.Text = value and (options.onText or "On") or (options.offText or "Off")
+            button.BackgroundColor3 = value and ui.accent or ui.dark
+            button.TextColor3 = value and ui.dark or ui.text
+            button.BackgroundTransparency = locked() and 0.6 or 0
+            button.AutoButtonColor = not locked()
+        end)
+
+        button.MouseButton1Click:Connect(function()
+            if locked() then
+                notifygui(options.text .. " requires " .. tostring(options.gateName), 255, 153, 0)
+                return
+            end
+            options.set(options.get() ~= true)
+            refreshConfig()
+        end)
+
+        return row
+    end
+
+    local addRange = function(indent)
+        local row = makeRow(rowHeight * 2)
+        local label = makeLabel(row, "Level Range", indent)
+        label.Size = UDim2.new(0.5, 0, 0.35, 0)
+        label.Position = UDim2.new(0, 8 + (indent or 0) * 12, 0.06, 0)
+
+        local readout = Instance.new("TextLabel")
+        readout.Name = "Readout"
+        readout.Size = UDim2.new(0.4, -10, 0.35, 0)
+        readout.Position = UDim2.new(0.6, 0, 0.06, 0)
+        readout.BackgroundTransparency = 1
+        readout.Text = "1 - 12"
+        readout.TextColor3 = ui.accent
+        readout.TextScaled = true
+        readout.TextXAlignment = Enum.TextXAlignment.Right
+        readout.Font = Enum.Font.GothamBold
+        readout.Parent = row
+        capText(readout)
+
+        local track = Instance.new("Frame")
+        track.Name = "Track"
+        track.Size = UDim2.new(1, -34, 0, 6)
+        track.Position = UDim2.new(0, 17, 0.72, 0)
+        track.AnchorPoint = Vector2.new(0, 0.5)
+        track.BackgroundColor3 = ui.dark
+        track.BorderSizePixel = 0
+        track.Active = true
+        track.Parent = row
+        round(track, 3)
+
+        local fill = Instance.new("Frame")
+        fill.Name = "Fill"
+        fill.Size = UDim2.new(1, 0, 1, 0)
+        fill.BackgroundColor3 = ui.secondary
+        fill.BorderSizePixel = 0
+        fill.Parent = track
+        round(fill, 3)
+
+        local makeHandle = function(name)
+            local handle = Instance.new("TextButton")
+            handle.Name = name
+            handle.Size = UDim2.fromOffset(14, 14)
+            handle.AnchorPoint = Vector2.new(0.5, 0.5)
+            handle.Position = UDim2.new(0, 0, 0.5, 0)
+            handle.BackgroundColor3 = ui.accent
+            handle.Text = ""
+            handle.AutoButtonColor = false
+            handle.BorderSizePixel = 0
+            handle.Parent = track
+            handle.Selectable = false
+            round(handle, 7)
+            return handle
+        end
+
+        local minHandle = makeHandle("MinHandle")
+        local maxHandle = makeHandle("MaxHandle")
+
+        local valueFromX = function(x)
+            local width = track.AbsoluteSize.X
+            if width <= 0 then return config.vicMinLevel end
+            local alpha = math.clamp((x - track.AbsolutePosition.X) / width, 0, 1)
+            return math.floor(alpha * 11 + 0.5) + 1
+        end
+
+        local dragging
+
+        local apply = function(x)
+            local value = valueFromX(x)
+            if dragging == "min" then
+                config.vicMinLevel = math.min(value, config.vicMaxLevel)
+            else
+                config.vicMaxLevel = math.max(value, config.vicMinLevel)
+            end
+            refreshConfig()
+        end
+
+        local startDrag = function(handle, which)
+            handle.InputBegan:Connect(function(input)
+                if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+                if not row.Visible then return end
+                dragging = which
+                apply(input.Position.X)
+            end)
+        end
+
+        startDrag(minHandle, "min")
+        startDrag(maxHandle, "max")
+
+        track.InputBegan:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            if not row.Visible then return end
+            local value = valueFromX(input.Position.X)
+            local toMin = math.abs(value - config.vicMinLevel)
+            local toMax = math.abs(value - config.vicMaxLevel)
+            dragging = toMin <= toMax and "min" or "max"
+            apply(input.Position.X)
+        end)
+
+        Services.UserInputService.InputChanged:Connect(function(input)
+            if not dragging or not row.Parent then return end
+            if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            apply(input.Position.X)
+        end)
+
+        Services.UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            dragging = nil
+        end)
+
+        table.insert(refreshers, function()
+            local minAlpha = (config.vicMinLevel - 1) / 11
+            local maxAlpha = (config.vicMaxLevel - 1) / 11
+            minHandle.Position = UDim2.new(minAlpha, 0, 0.5, 0)
+            maxHandle.Position = UDim2.new(maxAlpha, 0, 0.5, 0)
+            fill.Position = UDim2.new(minAlpha, 0, 0, 0)
+            fill.Size = UDim2.new(maxAlpha - minAlpha, 0, 1, 0)
+            readout.Text = "Lvl " .. config.vicMinLevel .. " - " .. config.vicMaxLevel
+        end)
+
+        return row
+    end
+
+    addToggle({
+        text = "Server Size",
+        onText = "Small",
+        offText = "Large",
+        get = function() return config.prioritizeSmallServer end,
+        set = function(value) config.prioritizeSmallServer = value end
+    })
+
+    addToggle({
+        text = "Autohop",
+        get = function() return config.autohop end,
+        set = function(value)
+            config.autohop = value
+            if not value then
+                config.autoClaimHive = false
+                config.fullAutoVic = false
+            end
+        end
+    })
+
+    addSection("Main Game")
+
+    addToggle({
+        text = "Auto Claim Hive",
+        indent = 1,
+        gate = function() return config.autohop == true end,
+        gateName = "Autohop",
+        get = function() return config.autoClaimHive end,
+        set = function(value)
+            config.autoClaimHive = value
+            if not value then
+                config.fullAutoVic = false
+            end
+        end
+    })
+
+    addToggle({
+        text = "Stick Bug",
+        indent = 1,
+        get = function() return config.stopList["StickBug"] end,
+        set = function(value) config.stopList["StickBug"] = value end
+    })
+
+    addToggle({
+        text = "Windy Bee",
+        indent = 1,
+        get = function() return config.stopList["Windy"] end,
+        set = function(value) config.stopList["Windy"] = value end
+    })
+
+    addToggle({
+        text = "Vicious",
+        indent = 1,
+        get = function() return config.stopList["Vicious"] end,
+        set = function(value) config.stopList["Vicious"] = value end
+    })
+
+    table.insert(viciousRows, addRange(2))
+
+    table.insert(viciousRows, addToggle({
+        text = "Gifted Only",
+        indent = 2,
+        get = function() return config.giftedViciousOnly end,
+        set = function(value) config.giftedViciousOnly = value end
+    }))
+
+    table.insert(viciousRows, addToggle({
+        text = "Full Auto",
+        indent = 2,
+        gate = function() return config.autoClaimHive == true end,
+        gateName = "Auto Claim Hive",
+        get = function() return config.fullAutoVic end,
+        set = function(value) config.fullAutoVic = value end
+    }))
+
+    addToggle({
+        text = "Puffshrooms",
+        indent = 1,
+        get = function() return config.stopList["Puffshroom"] end,
+        set = function(value) config.stopList["Puffshroom"] = value end
+    })
+
+    addToggle({
+        text = "Sprout",
+        indent = 1,
+        get = function() return config.stopList["Sprout"] end,
+        set = function(value) config.stopList["Sprout"] = value end
+    })
+
+    for _, name in ipairs(sproutOrder) do
+        table.insert(sproutRows, addToggle({
+            text = name,
+            indent = 2,
+            get = function() return config.sproutList[name] end,
+            set = function(value) config.sproutList[name] = value end
+        }))
+    end
+
+    refreshConfig = function()
+        if not frame.Parent then return end
+
+        for _, row in ipairs(viciousRows) do
+            row.Visible = config.stopList["Vicious"] == true
+        end
+
+        for _, row in ipairs(sproutRows) do
+            row.Visible = config.stopList["Sprout"] == true
+        end
+
+        for _, refresh in ipairs(refreshers) do
+            refresh()
+        end
+    end
+
+    saveButton.MouseButton1Click:Connect(function()
+        checkPrerequisites()
+        saveConfig()
+        refreshConfig()
+        notifygui("Config saved", 96, 186, 240)
+    end)
+
+    closeButton.MouseButton1Click:Connect(function()
+        frame.Visible = false
+    end)
+
+    refreshConfig()
+
+    return frame
+end
+
+toggleConfig = function(screenGui)
+    if not configFrame or configFrame.Parent ~= screenGui then
+        configFrame = buildConfigGui(screenGui)
+    end
+
+    configFrame.Visible = not configFrame.Visible
+
+    if configFrame.Visible then
+        cancelAutohop()
+        refreshConfig()
+    end
+end
+
 local attachESP = function(beeModel, beeType, r, g, b)
     if not beeModel then return end
     if beeModel:IsA("BasePart") then
@@ -686,7 +1199,7 @@ local watchVicious = function(beeModel)
         end
         notifygui("Vicious killed", 96, 186, 240)
         task.wait(1)
-        scan(false)
+        scan()
     end)
 end
 
@@ -899,7 +1412,7 @@ local conditionsHub = function()
     return conditions
 end
 
-scan = function(first)
+scan = function()
     desiredserver = false
     viciousKill = nil
     viciousModel = nil
@@ -977,18 +1490,18 @@ scan = function(first)
         if config.autohop then
             task.spawn(function()
                 notifygui("Autohopping", 60, 140, 210)
-                teleport(game.PlaceId)
+                teleport(game.PlaceId, true)
             end)
         end
-    elseif config.autohop and first then
+    elseif config.autohop then
         local sound = Instance.new("Sound")
         sound.SoundId = "rbxassetid://851699118"
         sound.Volume = 5
         sound.Parent = game:GetService("SoundService")
         task.spawn(function()
-            for i = 1, 5 do
+            for i = 1, 10 do
                 sound:Play()
-                task.wait(0.7)
+                task.wait(0.5)
             end
         end)
     end
@@ -1156,7 +1669,7 @@ if newversion then
     end
 end
 
-scan(true)
+scan()
 
 if config.autoClaimHive and desiredserver and game.PlaceId == data.placeids.main then
     task.spawn(function()
