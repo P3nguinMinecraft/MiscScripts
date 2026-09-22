@@ -99,6 +99,7 @@ local destroyParticles = false
 local hideDecorations = false
 local destroyHidden = false
 local teleportEnabled = false
+local teleportOffset = Vector3.new(0, -3, 0)
 
 local decorationWhitelist = {
     "workspace.Decorations.Stump.Stump"
@@ -106,9 +107,6 @@ local decorationWhitelist = {
 
 local espColor = Color3.fromRGB(255, 255, 255)
 local espBackgroundColor = Color3.fromRGB(24, 26, 33)
-
-local teleportDistance = 3
-local teleportTimeout = 1
 
 local espFont = Enum.Font.SourceSansBold
 local espTextSize = 14
@@ -121,8 +119,20 @@ for name in pairs(tokens) do
 end
 table.sort(tokenNames)
 
-local modes = { "None", "ESP", "Hide", "TP" }
-local modeLabels = { None = "None", ESP = "ESP", Hide = "Hide", TP = "TP⚠" }
+local modes = { "None", "ESP", "Hide" }
+local modeLabels = { None = "None", ESP = "ESP", Hide = "Hide" }
+
+local function canTP(entry)
+    return entry ~= nil and entry.tp == true and entry.mode ~= "Hide"
+end
+
+local function readPriority(value, fallback)
+    local number = tonumber(value)
+    if not number or number ~= number then
+        return fallback
+    end
+    return number
+end
 
 local modeExists = {}
 for _, mode in ipairs(modes) do
@@ -135,6 +145,8 @@ local draft = {}
 local function defaultEntry(name)
     return {
         mode = "None",
+        tp = false,
+        priority = 0,
         text = name,
         color = { math.floor(espColor.R * 255 + 0.5), math.floor(espColor.G * 255 + 0.5), math.floor(espColor.B * 255 + 0.5) },
         background = { math.floor(espBackgroundColor.R * 255 + 0.5), math.floor(espBackgroundColor.G * 255 + 0.5), math.floor(espBackgroundColor.B * 255 + 0.5) }
@@ -153,6 +165,8 @@ end
 local function copyEntry(entry)
     return {
         mode = entry.mode,
+        tp = entry.tp,
+        priority = entry.priority,
         text = entry.text,
         color = { entry.color[1], entry.color[2], entry.color[3] },
         background = { entry.background[1], entry.background[2], entry.background[3] }
@@ -161,6 +175,7 @@ end
 
 local function sameEntry(a, b)
     if a.mode ~= b.mode or a.text ~= b.text then return false end
+    if a.tp ~= b.tp or a.priority ~= b.priority then return false end
     for index = 1, 3 do
         if a.color[index] ~= b.color[index] then return false end
         if a.background[index] ~= b.background[index] then return false end
@@ -211,6 +226,8 @@ local function saveConfig()
     for name, entry in pairs(config) do
         saved.tokens[name] = {
             mode = entry.mode,
+            tp = entry.tp,
+            priority = entry.priority,
             text = entry.text,
             color = { entry.color[1], entry.color[2], entry.color[3] },
             background = { entry.background[1], entry.background[2], entry.background[3] }
@@ -293,7 +310,21 @@ local function loadConfig()
             local entry = getEntry(name)
             local defaults = defaultEntry(name)
 
-            entry.mode = modeExists[stored.mode] and stored.mode or defaults.mode
+            local storedMode = stored.mode
+            local legacyTP = storedMode == "TP" or storedMode == "ESP+TP"
+            if storedMode == "TP" then
+                storedMode = "None"
+            elseif storedMode == "ESP+TP" then
+                storedMode = "ESP"
+            end
+
+            entry.mode = modeExists[storedMode] and storedMode or defaults.mode
+            if type(stored.tp) == "boolean" then
+                entry.tp = stored.tp
+            else
+                entry.tp = legacyTP
+            end
+            entry.priority = readPriority(stored.priority, defaults.priority)
             entry.text = type(stored.text) == "string" and stored.text ~= "" and stored.text or defaults.text
 
             for index = 1, 3 do
@@ -567,26 +598,26 @@ local function applyAll()
 end
 
 getgenv().connections["tokenTeleport"] = task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait() do
         local root = getRoot()
         if teleportEnabled and root then
-            local target, distance
+            local target, priority, distance
             for _, token in ipairs(collectibles:GetChildren()) do
-                if isToken(token) and not isPickedUp(token) and tokenMode(token) == "TP" then
-                    local away = (token.Position - root.Position).Magnitude
-                    if not distance or away < distance then
-                        target, distance = token, away
+                if isToken(token) and not isPickedUp(token) then
+                    local _, entry = tokenMode(token)
+                    if canTP(entry) then
+                        local away = (token.Position - root.Position).Magnitude
+                        if not target or entry.priority < priority or (entry.priority == priority and away < distance) then
+                            target, priority, distance = token, entry.priority, away
+                        end
                     end
                 end
             end
-            if target then
-                if distance > teleportDistance then
-                    root.CFrame = CFrame.new(target.Position)
-                end
-                local timeout = os.clock() + teleportTimeout
-                while target.Parent and not isPickedUp(target) and os.clock() < timeout do
-                    task.wait(0.05)
-                end
+            while target and target.Parent and not isPickedUp(target) and teleportEnabled do
+                root = getRoot()
+                if not root then break end
+                root.CFrame = CFrame.new(target.Position + teleportOffset)
+                task.wait()
             end
         end
     end
@@ -1226,8 +1257,57 @@ new("UIListLayout", {
     SortOrder = Enum.SortOrder.LayoutOrder
 }, modeRow)
 
-local espSection = new("Frame", {
+local modeButtonWidth = math.floor((contentWidth - (#modes - 1) * 6) / #modes)
+
+local tpRow = new("Frame", {
     LayoutOrder = 10,
+    Size = UDim2.new(1, 0, 0, 30),
+    BackgroundTransparency = 1,
+    Visible = false
+}, body)
+
+local tpButton = new("TextButton", {
+    Size = UDim2.fromOffset(modeButtonWidth, 30),
+    BackgroundColor3 = theme.field,
+    BorderSizePixel = 0,
+    AutoButtonColor = true,
+    Font = Enum.Font.GothamMedium,
+    Text = "⚠ TP ⚠",
+    TextSize = 12,
+    TextColor3 = theme.muted
+}, tpRow)
+corner(tpButton)
+stroke(tpButton)
+
+local priorityLabel = new("TextLabel", {
+    Size = UDim2.fromOffset(60, 30),
+    Position = UDim2.fromOffset(modeButtonWidth + 12, 0),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamMedium,
+    Text = "Priority",
+    TextSize = 12,
+    TextColor3 = theme.muted,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Visible = false
+}, tpRow)
+
+local priorityBox = new("TextBox", {
+    Size = UDim2.new(1, -(modeButtonWidth + 76), 0, 30),
+    Position = UDim2.fromOffset(modeButtonWidth + 76, 0),
+    BackgroundColor3 = theme.field,
+    BorderSizePixel = 0,
+    ClearTextOnFocus = false,
+    Font = Enum.Font.Gotham,
+    Text = "0",
+    TextSize = 13,
+    TextColor3 = theme.text,
+    Visible = false
+}, tpRow)
+corner(priorityBox)
+stroke(priorityBox)
+
+local espSection = new("Frame", {
+    LayoutOrder = 11,
     Size = UDim2.new(1, 0, 0, 0),
     AutomaticSize = Enum.AutomaticSize.Y,
     BackgroundColor3 = theme.panel,
@@ -1346,11 +1426,11 @@ end
 local colorBoxes, colorSwatch = colorRow(3, "ESP Color", "color")
 local backgroundBoxes, backgroundSwatch = colorRow(4, "Background Color", "background")
 
-local previewTitle = sectionLabel("Preview", 11)
+local previewTitle = sectionLabel("Preview", 12)
 previewTitle.Visible = false
 
 local previewArea = new("Frame", {
-    LayoutOrder = 12,
+    LayoutOrder = 13,
     Size = UDim2.new(1, 0, 0, 80),
     BackgroundColor3 = theme.panel,
     BorderSizePixel = 0,
@@ -1408,6 +1488,13 @@ local function refreshModeButtons()
     modeTitle.Visible = entry ~= nil
     modeRow.Visible = entry ~= nil
     espSection.Visible = entry ~= nil and entry.mode == "ESP"
+
+    local tpOn = canTP(entry)
+    tpRow.Visible = entry ~= nil and entry.mode ~= "Hide"
+    tpButton.BackgroundColor3 = tpOn and theme.accent or theme.field
+    tpButton.TextColor3 = tpOn and Color3.fromRGB(255, 255, 255) or theme.muted
+    priorityLabel.Visible = tpOn
+    priorityBox.Visible = tpOn
 end
 
 local refreshList
@@ -1417,6 +1504,7 @@ local function refreshFields()
 
     if entry then
         textBox.Text = entry.text
+        priorityBox.Text = tostring(entry.priority)
         for index = 1, 3 do
             colorBoxes[index].Text = tostring(entry.color[index])
             backgroundBoxes[index].Text = tostring(entry.background[index])
@@ -1440,7 +1528,7 @@ end
 for index, mode in ipairs(modes) do
     local button = new("TextButton", {
         LayoutOrder = index,
-        Size = UDim2.fromOffset(math.floor((contentWidth - 18) / 4), 30),
+        Size = UDim2.fromOffset(modeButtonWidth, 30),
         BackgroundColor3 = theme.field,
         BorderSizePixel = 0,
         AutoButtonColor = true,
@@ -1458,6 +1546,23 @@ for index, mode in ipairs(modes) do
 
     modeButtons[mode] = button
 end
+
+tpButton.MouseButton1Click:Connect(function()
+    local entry = currentEntry()
+    if not entry or entry.mode == "Hide" then return end
+    entry.tp = not entry.tp
+    refreshModeButtons()
+    refreshList()
+    refreshUnsaved()
+end)
+
+priorityBox.FocusLost:Connect(function()
+    local entry = currentEntry()
+    if not entry then return end
+    entry.priority = readPriority(priorityBox.Text, entry.priority)
+    priorityBox.Text = tostring(entry.priority)
+    refreshUnsaved()
+end)
 
 local function selectToken(name)
     if selected == name then
@@ -1488,6 +1593,10 @@ refreshList = function()
             order = order + 1
             local entry = draft[name]
             local mode = entry and entry.mode or "None"
+            local tag = mode ~= "None" and modeLabels[mode] or nil
+            if canTP(entry) then
+                tag = tag and (tag .. " + TP") or "TP"
+            end
 
             local button = new("TextButton", {
                 LayoutOrder = order,
@@ -1499,20 +1608,20 @@ refreshList = function()
                 Font = Enum.Font.Gotham,
                 Text = name,
                 TextSize = 13,
-                TextColor3 = mode == "None" and theme.text or theme.accent,
+                TextColor3 = tag and theme.accent or theme.text,
                 TextXAlignment = Enum.TextXAlignment.Left
             }, list)
             corner(button, 5)
 
             new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, button)
 
-            if mode ~= "None" then
+            if tag then
                 new("TextLabel", {
-                    Size = UDim2.fromOffset(46, 26),
-                    Position = UDim2.new(1, -46, 0, 0),
+                    Size = UDim2.fromOffset(62, 26),
+                    Position = UDim2.new(1, -62, 0, 0),
                     BackgroundTransparency = 1,
                     Font = Enum.Font.GothamMedium,
-                    Text = modeLabels[mode],
+                    Text = tag,
                     TextSize = 11,
                     TextColor3 = theme.muted,
                     TextXAlignment = Enum.TextXAlignment.Right
