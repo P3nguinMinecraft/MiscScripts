@@ -98,8 +98,9 @@ local destroyBalloons = false
 local destroyParticles = false
 local hideDecorations = false
 local destroyHidden = false
-local teleportEnabled = false
 local teleportOffset = Vector3.new(0, -3, 0)
+local teleportDelay = 0.5
+local teleportCooldown = 0.5
 
 local decorationWhitelist = {
     "workspace.Decorations.Stump.Stump"
@@ -584,10 +585,27 @@ if getgenv().connections["tokenDrag"] then
     getgenv().connections["tokenDrag"]:Disconnect()
 end
 
+if getgenv().connections["tokenRemoved"] then
+    getgenv().connections["tokenRemoved"]:Disconnect()
+end
+
 restoreAllHidden()
 
+local spawnTimes = {}
+
+local function tpReady(token)
+    local spawned = spawnTimes[token]
+    return spawned == nil or os.clock() - spawned >= teleportDelay
+end
+
 local collectibles = Workspace:WaitForChild("Collectibles")
-getgenv().connections["tokensConnection"] = collectibles.ChildAdded:Connect(applyToken)
+getgenv().connections["tokensConnection"] = collectibles.ChildAdded:Connect(function(collectible)
+    spawnTimes[collectible] = os.clock()
+    applyToken(collectible)
+end)
+getgenv().connections["tokenRemoved"] = collectibles.ChildRemoved:Connect(function(collectible)
+    spawnTimes[collectible] = nil
+end)
 
 local function applyAll()
     for _, collectible in ipairs(collectibles:GetChildren()) do
@@ -600,10 +618,10 @@ end
 getgenv().connections["tokenTeleport"] = task.spawn(function()
     while task.wait() do
         local root = getRoot()
-        if teleportEnabled and root then
+        if root then
             local target, priority, distance
             for _, token in ipairs(collectibles:GetChildren()) do
-                if isToken(token) and not isPickedUp(token) then
+                if isToken(token) and not isPickedUp(token) and tpReady(token) then
                     local _, entry = tokenMode(token)
                     if canTP(entry) then
                         local away = (token.Position - root.Position).Magnitude
@@ -613,11 +631,14 @@ getgenv().connections["tokenTeleport"] = task.spawn(function()
                     end
                 end
             end
-            while target and target.Parent and not isPickedUp(target) and teleportEnabled do
+            while target and target.Parent and not isPickedUp(target) and canTP(select(2, tokenMode(target))) do
                 root = getRoot()
                 if not root then break end
                 root.CFrame = CFrame.new(target.Position + teleportOffset)
                 task.wait()
+            end
+            if target then
+                task.wait(teleportCooldown)
             end
         end
     end
@@ -1658,7 +1679,6 @@ textBox.FocusLost:Connect(function()
 end)
 
 local function reloadESP()
-    teleportEnabled = true
     clearESP()
     applyAll()
 end
@@ -1686,9 +1706,25 @@ saveButton.MouseButton1Click:Connect(function()
 end)
 
 closeButton.MouseButton1Click:Connect(function()
+    local connections = getgenv().connections
+    for _, key in ipairs({ "tokensConnection", "tokenRemoved", "tokenDrag" }) do
+        if connections[key] then
+            connections[key]:Disconnect()
+            connections[key] = nil
+        end
+    end
+    for _, key in ipairs({ "tokenLoop", "tokenTeleport" }) do
+        if connections[key] then
+            task.cancel(connections[key])
+            connections[key] = nil
+        end
+    end
     setBalloonPurge(false)
     setParticlePurge(false)
     setDecorationsHidden(false)
+    restoreAllHidden()
+    clearESP()
+    table.clear(spawnTimes)
     screen:Destroy()
 end)
 
@@ -1720,9 +1756,11 @@ header.InputBegan:Connect(function(input)
         dragging = true
         dragStart = input.Position
         startPosition = main.Position
-        input.Changed:Connect(function()
+        local ended
+        ended = input.Changed:Connect(function()
             if input.UserInputState == Enum.UserInputState.End then
                 dragging = false
+                ended:Disconnect()
             end
         end)
     end
