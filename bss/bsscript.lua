@@ -98,9 +98,14 @@ local destroyBalloons = false
 local destroyParticles = false
 local hideDecorations = false
 local destroyHidden = false
+local autoShower = false
 local teleportOffset = Vector3.new(0, -3, 0)
 local teleportDelay = 0.5
 local teleportCooldown = 0.5
+local showerOffset = Vector3.new(0, 0, 0)
+local showerLead = 1
+local showerColor = { 50, 255, 50 }
+local showerSize = 8
 
 local decorationWhitelist = {
     "workspace.Decorations.Stump.Stump"
@@ -222,6 +227,7 @@ local function saveConfig()
         destroyParticles = destroyParticles,
         hideDecorations = hideDecorations,
         destroyHidden = destroyHidden,
+        autoShower = autoShower,
         tokens = {}
     }
     for name, entry in pairs(config) do
@@ -298,6 +304,10 @@ local function loadConfig()
 
     if type(saved.destroyHidden) == "boolean" then
         destroyHidden = saved.destroyHidden
+    end
+
+    if type(saved.autoShower) == "boolean" then
+        autoShower = saved.autoShower
     end
 
     local storedTokens = type(saved.tokens) == "table" and saved.tokens or saved
@@ -615,10 +625,79 @@ local function applyAll()
     end
 end
 
+local ParticleTools = require(ReplicatedStorage.ParticleTools)
+
+getgenv().originalMakeWarningDisk = getgenv().originalMakeWarningDisk or ParticleTools.MakeWarningDisk
+local originalMakeWarningDisk = getgenv().originalMakeWarningDisk
+
+local showerDisks = {}
+local creatingDisk = false
+
+local function isShowerColor(color)
+    if typeof(color) ~= "Color3" then return false end
+    return math.floor(color.R * 255 + 0.5) == showerColor[1]
+        and math.floor(color.G * 255 + 0.5) == showerColor[2]
+        and math.floor(color.B * 255 + 0.5) == showerColor[3]
+end
+
+local function isShowerDisk(disk)
+    local size = disk.Size
+    return isShowerColor(disk.Color)
+        and math.floor(size.X + 0.5) == showerSize
+        and math.floor(size.Z + 0.5) == showerSize
+end
+
+local function keepParticle(child)
+    if not autoShower then return false end
+    return creatingDisk or showerDisks[child] ~= nil
+end
+
+ParticleTools.MakeWarningDisk = function(position, radius, duration, color)
+    creatingDisk = true
+    local ok, disk = pcall(originalMakeWarningDisk, position, radius, duration, color)
+    creatingDisk = false
+    if not ok then
+        error(disk, 0)
+    end
+    if typeof(disk) == "Instance" then
+        if autoShower and isShowerDisk(disk) then
+            local now = os.clock()
+            showerDisks[disk] = { created = now, expires = now + (duration or 2) }
+        elseif destroyParticles and disk.Parent then
+            disk:Destroy()
+        end
+    end
+    return disk
+end
+
+local function nextDisk()
+    local now = os.clock()
+    local target, earliest
+    for disk, times in pairs(showerDisks) do
+        if not disk.Parent then
+            showerDisks[disk] = nil
+        elseif now >= times.expires - showerLead and (not earliest or times.created < earliest) then
+            target, earliest = disk, times.created
+        end
+    end
+    if not autoShower then
+        return nil
+    end
+    return target
+end
+
 getgenv().connections["tokenTeleport"] = task.spawn(function()
     while task.wait() do
         local root = getRoot()
-        if root then
+        local disk = root and nextDisk()
+        if disk then
+            while disk.Parent and autoShower do
+                root = getRoot()
+                if not root then break end
+                root.CFrame = CFrame.new(disk.Position + showerOffset)
+                task.wait()
+            end
+        elseif root then
             local target, priority, distance
             for _, token in ipairs(collectibles:GetChildren()) do
                 if isToken(token) and not isPickedUp(token) and tpReady(token) then
@@ -631,14 +710,17 @@ getgenv().connections["tokenTeleport"] = task.spawn(function()
                     end
                 end
             end
-            while target and target.Parent and not isPickedUp(target) and canTP(select(2, tokenMode(target))) do
+            while target and target.Parent and not isPickedUp(target) and canTP(select(2, tokenMode(target))) and not nextDisk() do
                 root = getRoot()
                 if not root then break end
                 root.CFrame = CFrame.new(target.Position + teleportOffset)
                 task.wait()
             end
             if target then
-                task.wait(teleportCooldown)
+                local resume = os.clock() + teleportCooldown
+                while os.clock() < resume and not nextDisk() do
+                    task.wait()
+                end
             end
         end
     end
@@ -972,8 +1054,7 @@ local function toggleRow(text, order, get, set, onLabel, offLabel)
     return refresh
 end
 
-local function createPurger(...)
-    local path = { ... }
+local function createPurger(path, keep)
     local enabled = false
     local sweep
     local hook
@@ -989,6 +1070,7 @@ local function createPurger(...)
     end
 
     local function destroy(child)
+        if keep and keep(child) then return end
         pcall(function()
             child:Destroy()
         end)
@@ -1128,8 +1210,8 @@ if getgenv().connections["purgers"] then
     end
 end
 
-local setBalloonPurge = createPurger("Balloons", "FieldBalloons")
-local setParticlePurge = createPurger("Particles")
+local setBalloonPurge = createPurger({ "Balloons", "FieldBalloons" })
+local setParticlePurge = createPurger({ "Particles" }, keepParticle)
 
 local setDecorationsStash = createStasher("Decorations", ReplicatedStorage, decorationWhitelist)
 local setFieldDecosStash = createStasher("FieldDecos", ReplicatedStorage, decorationWhitelist)
@@ -1186,14 +1268,23 @@ end, function(value)
     applyAll()
 end, "Destroy", "Transparent")
 
+toggleRow("Auto Shower (TP)", 5, function()
+    return autoShower
+end, function(value)
+    autoShower = value
+    if not value then
+        table.clear(showerDisks)
+    end
+end)
+
 setBalloonPurge(destroyBalloons)
 setParticlePurge(destroyParticles)
 setDecorationsHidden(hideDecorations)
 
-sectionLabel("Token", 5)
+sectionLabel("Token", 6)
 
 local selector = new("TextButton", {
-    LayoutOrder = 6,
+    LayoutOrder = 7,
     Size = UDim2.new(1, 0, 0, 32),
     BackgroundColor3 = theme.field,
     BorderSizePixel = 0,
@@ -1218,7 +1309,7 @@ new("TextLabel", {
 }, selector)
 
 local dropdown = new("Frame", {
-    LayoutOrder = 7,
+    LayoutOrder = 8,
     Size = UDim2.new(1, 0, 0, 208),
     BackgroundColor3 = theme.panel,
     BorderSizePixel = 0,
@@ -1262,11 +1353,11 @@ new("UIListLayout", {
     SortOrder = Enum.SortOrder.LayoutOrder
 }, list)
 
-local modeTitle = sectionLabel("Mode", 8)
+local modeTitle = sectionLabel("Mode", 9)
 modeTitle.Visible = false
 
 local modeRow = new("Frame", {
-    LayoutOrder = 9,
+    LayoutOrder = 10,
     Size = UDim2.new(1, 0, 0, 30),
     BackgroundTransparency = 1,
     Visible = false
@@ -1281,7 +1372,7 @@ new("UIListLayout", {
 local modeButtonWidth = math.floor((contentWidth - (#modes - 1) * 6) / #modes)
 
 local tpRow = new("Frame", {
-    LayoutOrder = 10,
+    LayoutOrder = 11,
     Size = UDim2.new(1, 0, 0, 30),
     BackgroundTransparency = 1,
     Visible = false
@@ -1328,7 +1419,7 @@ corner(priorityBox)
 stroke(priorityBox)
 
 local espSection = new("Frame", {
-    LayoutOrder = 11,
+    LayoutOrder = 12,
     Size = UDim2.new(1, 0, 0, 0),
     AutomaticSize = Enum.AutomaticSize.Y,
     BackgroundColor3 = theme.panel,
@@ -1447,11 +1538,11 @@ end
 local colorBoxes, colorSwatch = colorRow(3, "ESP Color", "color")
 local backgroundBoxes, backgroundSwatch = colorRow(4, "Background Color", "background")
 
-local previewTitle = sectionLabel("Preview", 12)
+local previewTitle = sectionLabel("Preview", 13)
 previewTitle.Visible = false
 
 local previewArea = new("Frame", {
-    LayoutOrder = 13,
+    LayoutOrder = 14,
     Size = UDim2.new(1, 0, 0, 80),
     BackgroundColor3 = theme.panel,
     BorderSizePixel = 0,
@@ -1725,6 +1816,8 @@ closeButton.MouseButton1Click:Connect(function()
     restoreAllHidden()
     clearESP()
     table.clear(spawnTimes)
+    ParticleTools.MakeWarningDisk = originalMakeWarningDisk
+    table.clear(showerDisks)
     screen:Destroy()
 end)
 
