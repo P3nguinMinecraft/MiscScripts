@@ -99,6 +99,7 @@ local destroyParticles = false
 local hideDecorations = false
 local destroyHidden = false
 local autoShower = false
+local showerDelay = 0.2
 local teleportOffset = Vector3.new(0, -3, 0)
 local teleportDelay = 0.5
 local teleportCooldown = 0.5
@@ -228,6 +229,7 @@ local function saveConfig()
         hideDecorations = hideDecorations,
         destroyHidden = destroyHidden,
         autoShower = autoShower,
+        showerDelay = showerDelay,
         tokens = {}
     }
     for name, entry in pairs(config) do
@@ -308,6 +310,11 @@ local function loadConfig()
 
     if type(saved.autoShower) == "boolean" then
         autoShower = saved.autoShower
+    end
+
+    local storedShowerDelay = tonumber(saved.showerDelay)
+    if storedShowerDelay and storedShowerDelay == storedShowerDelay then
+        showerDelay = math.clamp(storedShowerDelay, 0, 1)
     end
 
     local storedTokens = type(saved.tokens) == "table" and saved.tokens or saved
@@ -676,7 +683,7 @@ local function nextDisk()
     for disk, times in pairs(showerDisks) do
         if not disk.Parent then
             showerDisks[disk] = nil
-        elseif now >= times.expires - showerLead and (not earliest or times.created < earliest) then
+        elseif now >= times.expires - showerLead and times.expires - now >= showerDelay and (not earliest or times.created < earliest) then
             target, earliest = disk, times.created
         end
     end
@@ -1054,6 +1061,109 @@ local function toggleRow(text, order, get, set, onLabel, offLabel)
     return refresh
 end
 
+local activeSlider
+
+local function sliderRow(text, order, min, max, step, get, set)
+    local row = new("Frame", {
+        LayoutOrder = order,
+        Size = UDim2.new(1, 0, 0, 48),
+        BackgroundColor3 = theme.panel,
+        BorderSizePixel = 0
+    }, body)
+    corner(row)
+    stroke(row)
+
+    new("TextLabel", {
+        Size = UDim2.new(1, -70, 0, 24),
+        Position = UDim2.fromOffset(10, 2),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamMedium,
+        Text = text,
+        TextSize = 12,
+        TextColor3 = theme.text,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, row)
+
+    local valueLabel = new("TextLabel", {
+        Size = UDim2.fromOffset(50, 24),
+        Position = UDim2.new(1, -60, 0, 2),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamMedium,
+        Text = "",
+        TextSize = 12,
+        TextColor3 = theme.muted,
+        TextXAlignment = Enum.TextXAlignment.Right
+    }, row)
+
+    local track = new("Frame", {
+        Size = UDim2.new(1, -24, 0, 6),
+        Position = UDim2.fromOffset(12, 31),
+        BackgroundColor3 = theme.field,
+        BorderSizePixel = 0
+    }, row)
+    corner(track, 3)
+
+    local fill = new("Frame", {
+        Size = UDim2.fromScale(0, 1),
+        BackgroundColor3 = theme.accent,
+        BorderSizePixel = 0
+    }, track)
+    corner(fill, 3)
+
+    local knob = new("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Size = UDim2.fromOffset(14, 14),
+        Position = UDim2.fromScale(0, 0.5),
+        BackgroundColor3 = theme.text,
+        BorderSizePixel = 0
+    }, track)
+    corner(knob, 7)
+
+    local hitbox = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 24),
+        Position = UDim2.fromOffset(0, 22),
+        BackgroundTransparency = 1,
+        Text = "",
+        ZIndex = 2
+    }, row)
+
+    local function refresh()
+        local value = get()
+        local alpha = math.clamp((value - min) / (max - min), 0, 1)
+        fill.Size = UDim2.fromScale(alpha, 1)
+        knob.Position = UDim2.fromScale(alpha, 0.5)
+        valueLabel.Text = string.format("%.2f", value)
+    end
+
+    local function update(x)
+        local width = track.AbsoluteSize.X
+        if width <= 0 then return end
+        local alpha = math.clamp((x - track.AbsolutePosition.X) / width, 0, 1)
+        local steps = math.floor(alpha * (max - min) / step + 0.5)
+        set(tonumber(string.format("%.4f", min + steps * step)))
+        refresh()
+    end
+
+    hitbox.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        activeSlider = update
+        update(input.Position.X)
+        local ended
+        ended = input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                if activeSlider == update then
+                    activeSlider = nil
+                end
+                ended:Disconnect()
+            end
+        end)
+    end)
+
+    refresh()
+
+    return refresh
+end
+
 local function createPurger(path, keep)
     local enabled = false
     local sweep
@@ -1277,14 +1387,20 @@ end, function(value)
     end
 end)
 
+sliderRow("Shower Delay", 6, 0, 1, 0.05, function()
+    return showerDelay
+end, function(value)
+    showerDelay = value
+end)
+
 setBalloonPurge(destroyBalloons)
 setParticlePurge(destroyParticles)
 setDecorationsHidden(hideDecorations)
 
-sectionLabel("Token", 6)
+sectionLabel("Token", 7)
 
 local selector = new("TextButton", {
-    LayoutOrder = 7,
+    LayoutOrder = 8,
     Size = UDim2.new(1, 0, 0, 32),
     BackgroundColor3 = theme.field,
     BorderSizePixel = 0,
@@ -1309,7 +1425,7 @@ new("TextLabel", {
 }, selector)
 
 local dropdown = new("Frame", {
-    LayoutOrder = 8,
+    LayoutOrder = 9,
     Size = UDim2.new(1, 0, 0, 208),
     BackgroundColor3 = theme.panel,
     BorderSizePixel = 0,
@@ -1353,11 +1469,11 @@ new("UIListLayout", {
     SortOrder = Enum.SortOrder.LayoutOrder
 }, list)
 
-local modeTitle = sectionLabel("Mode", 9)
+local modeTitle = sectionLabel("Mode", 10)
 modeTitle.Visible = false
 
 local modeRow = new("Frame", {
-    LayoutOrder = 10,
+    LayoutOrder = 11,
     Size = UDim2.new(1, 0, 0, 30),
     BackgroundTransparency = 1,
     Visible = false
@@ -1372,7 +1488,7 @@ new("UIListLayout", {
 local modeButtonWidth = math.floor((contentWidth - (#modes - 1) * 6) / #modes)
 
 local tpRow = new("Frame", {
-    LayoutOrder = 11,
+    LayoutOrder = 12,
     Size = UDim2.new(1, 0, 0, 30),
     BackgroundTransparency = 1,
     Visible = false
@@ -1419,7 +1535,7 @@ corner(priorityBox)
 stroke(priorityBox)
 
 local espSection = new("Frame", {
-    LayoutOrder = 12,
+    LayoutOrder = 13,
     Size = UDim2.new(1, 0, 0, 0),
     AutomaticSize = Enum.AutomaticSize.Y,
     BackgroundColor3 = theme.panel,
@@ -1538,11 +1654,11 @@ end
 local colorBoxes, colorSwatch = colorRow(3, "ESP Color", "color")
 local backgroundBoxes, backgroundSwatch = colorRow(4, "Background Color", "background")
 
-local previewTitle = sectionLabel("Preview", 13)
+local previewTitle = sectionLabel("Preview", 14)
 previewTitle.Visible = false
 
 local previewArea = new("Frame", {
-    LayoutOrder = 14,
+    LayoutOrder = 15,
     Size = UDim2.new(1, 0, 0, 80),
     BackgroundColor3 = theme.panel,
     BorderSizePixel = 0,
@@ -1860,8 +1976,12 @@ header.InputBegan:Connect(function(input)
 end)
 
 getgenv().connections["tokenDrag"] = UserInputService.InputChanged:Connect(function(input)
-    if not dragging then return end
     if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    if activeSlider then
+        activeSlider(input.Position.X)
+        return
+    end
+    if not dragging then return end
     local delta = input.Position - dragStart
     main.Position = UDim2.new(
         startPosition.X.Scale,
