@@ -1,9 +1,11 @@
 return function(placeid, smallServer)
+    smallServer = smallServer or true
+
     local TeleportService = game:GetService("TeleportService")
     local HttpService = game:GetService("HttpService")
     local Players = game:GetService("Players")
 
-    local CACHE_TIME = 300 
+    local DATA_MAX_AGE = 1
     local folder = "servers"
     local filename = folder .. "/" .. placeid .. (smallServer and "L" or "H") .. ".json"
 
@@ -12,7 +14,7 @@ return function(placeid, smallServer)
     end
 
     local function now()
-        return os.time()
+        return DateTime.now().UnixTimestamp
     end
 
     local function LoadCache()
@@ -25,11 +27,6 @@ return function(placeid, smallServer)
         if not ok or not data.timestamp or not data.data then
             return nil
         end
-
-        if now() - data.timestamp > CACHE_TIME then
-            return nil
-        end
-
         return data.data
     end
 
@@ -40,34 +37,53 @@ return function(placeid, smallServer)
         }))
     end
 
-    local function FetchServers(cursor)
+    local function FetchServers()
         local url =
             "https://games.roblox.com/v1/games/" .. placeid ..
-            "/servers/Public?limit=100&excludeFullGames=true&sortOrder=" .. (smallServer and "Asc" or "Desc") ..
-            (cursor and "&cursor=" .. cursor or "")
+            "/servers/Public?limit=100&excludeFullGames=true&sortOrder=" .. (smallServer and "Asc" or "Desc")
 
-        local raw = game:HttpGet(url)
-        return HttpService:JSONDecode(raw)
+        local success, raw = pcall(function()
+            return game:HttpGet(url)
+        end)
+
+        if not success or not raw then
+            return nil
+        end
+
+        local decodeSuccess, decoded = pcall(function()
+            return HttpService:JSONDecode(raw)
+        end)
+
+        if not decodeSuccess or not decoded then
+            return nil
+        end
+
+        if decoded.errors then
+            return nil
+        end
+        return decoded
     end
 
     local Servers = LoadCache()
+    local cacheTimestamp = 0
 
-    if not Servers then
-        local collected = { data = {}, nextPageCursor = nil }
-        local cursor = nil
+    if Servers then
+        local ok, cachedData = pcall(function()
+            return HttpService:JSONDecode(readfile(filename))
+        end)
+        if ok and cachedData and cachedData.timestamp then
+            cacheTimestamp = cachedData.timestamp
+        end
+    end
 
-        repeat
-            local page = FetchServers(cursor)
-            if page and page.data then
-                for _, s in ipairs(page.data) do
-                    table.insert(collected.data, s)
-                end
-            end
-            cursor = page.nextPageCursor
-        until not cursor
+    local shouldFetch = not Servers or (now() - cacheTimestamp) >= DATA_MAX_AGE
 
-        Servers = collected
-        SaveCache(Servers)
+    if shouldFetch then
+        local result = FetchServers()
+        if result and result.data then
+            Servers = result.data
+            SaveCache(Servers)
+        end
     end
 
     local function RemoveServer(serverId)
@@ -75,19 +91,19 @@ return function(placeid, smallServer)
         local cache = HttpService:JSONDecode(readfile(filename))
 
         local new = {}
-        for _, s in ipairs(cache.data.data) do
+        for _, s in ipairs(cache.data) do
             if s.id ~= serverId then
                 table.insert(new, s)
             end
         end
 
-        cache.data.data = new
+        cache.data = new
         writefile(filename, HttpService:JSONEncode(cache))
     end
 
     local target = nil
 
-    for _, s in ipairs(Servers.data) do
+    for _, s in ipairs(Servers) do
         if s.playing < s.maxPlayers and s.id ~= game.JobId then
             target = s
             break
@@ -95,19 +111,14 @@ return function(placeid, smallServer)
     end
 
     if not target then
-        return warn("No valid server found")
+        warn("No valid server found - Servers: ", (not Servers or #Servers < 0) and "Empty" or #Servers)
     end
 
     RemoveServer(target.id)
-
+    
     TeleportService:TeleportToPlaceInstance(
         placeid,
         target.id,
         Players.LocalPlayer
     )
-
-    task.spawn(function()
-        task.wait(10)
-        TeleportService:TeleportToPlaceInstance(placeid, game.JobId, Players.LocalPlayer)
-    end)
 end
